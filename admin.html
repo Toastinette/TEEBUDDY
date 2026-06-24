@@ -1,0 +1,144 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1.0">
+<title>Teebuddy · Admin</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Barlow+Condensed:wght@400;600;700;800;900&family=Barlow:wght@400;500;600&display=swap">
+<style>
+  *,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
+  :root{--green:#2ECC71;--red:#E74C3C;--bg:#F0F0EE;--card:#fff;--text:#1A1A1A;--muted:#888;--border:#E0E0DC}
+  body{font-family:'Barlow',sans-serif;background:var(--bg);color:var(--text);padding:24px;max-width:900px;margin:0 auto}
+  h1{font-family:'Barlow Condensed',sans-serif;font-weight:900;text-transform:uppercase;font-size:28px;margin-bottom:4px}
+  h2{font-family:'Barlow Condensed',sans-serif;font-weight:800;text-transform:uppercase;font-size:18px;margin:28px 0 12px;letter-spacing:.03em}
+  .sub{color:var(--muted);font-size:14px;margin-bottom:20px}
+  .card{background:var(--card);border-radius:16px;padding:18px;box-shadow:0 2px 12px rgba(0,0,0,.06);margin-bottom:12px}
+  .badge{display:inline-block;font-family:'Barlow Condensed',sans-serif;font-weight:700;font-size:11px;text-transform:uppercase;padding:3px 10px;border-radius:20px;letter-spacing:.05em}
+  .badge.live{background:var(--green);color:#fff}
+  .badge.lobby{background:#FFF3CD;color:#856404}
+  .btn{font-family:'Barlow Condensed',sans-serif;font-weight:800;text-transform:uppercase;letter-spacing:.04em;border:none;border-radius:30px;padding:10px 18px;cursor:pointer;font-size:13px}
+  .btn-red{background:#FFF0F0;color:var(--red)}
+  .btn-dark{background:var(--text);color:#fff}
+  .btn-green{background:var(--green);color:#fff}
+  .row{display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap}
+  .muted{color:var(--muted);font-size:13px}
+  table{width:100%;border-collapse:collapse;font-size:13px;margin-top:8px}
+  th,td{text-align:left;padding:6px 8px;border-bottom:1px solid var(--border)}
+  th{font-family:'Barlow Condensed',sans-serif;text-transform:uppercase;font-size:11px;color:var(--muted)}
+  .inp{border:2px solid var(--border);border-radius:10px;padding:8px 12px;font-family:'Barlow',sans-serif;font-size:14px;width:100%}
+  .empty{text-align:center;padding:40px;color:var(--muted)}
+  .pill{display:inline-flex;align-items:center;gap:5px;background:var(--bg);border-radius:20px;padding:4px 10px;font-size:12px;margin:2px}
+  code{background:var(--bg);padding:2px 6px;border-radius:5px;font-size:12px}
+</style>
+</head>
+<body>
+  <h1>Teebuddy · Admin</h1>
+  <div class="sub">Console de gestion. Visualise les parties actives, nettoie la base, consulte les parcours.</div>
+
+  <div class="row">
+    <h2 style="margin-top:0;">Parties actives</h2>
+    <button class="btn btn-dark" onclick="loadGames()">↻ Rafraîchir</button>
+  </div>
+  <div id="games"><div class="empty">Chargement...</div></div>
+
+  <h2>Nettoyage</h2>
+  <div class="card">
+    <div class="muted" style="margin-bottom:12px;">Supprime les parties inactives depuis plus de X heures (parties fantômes où tout le monde a fermé l'app sans cliquer sur « Terminer »).</div>
+    <div class="row">
+      <div style="display:flex;align-items:center;gap:8px;">
+        <span class="muted">Inactives depuis plus de</span>
+        <input class="inp" id="purge-hours" type="number" value="6" min="1" style="width:70px;">
+        <span class="muted">heures</span>
+      </div>
+      <button class="btn btn-red" onclick="purgeOld()">🧹 Nettoyer</button>
+    </div>
+    <div id="purge-result" class="muted" style="margin-top:10px;"></div>
+  </div>
+
+  <h2>Parcours configurés</h2>
+  <div class="muted" style="margin-bottom:12px;">Pour l'instant, les parcours sont définis dans <code>config.js</code>. La gestion via cette page (ajout en base) viendra ensuite.</div>
+  <div id="courses"></div>
+
+<script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-app-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-firestore-compat.js"></script>
+<script src="config.js"></script>
+<script>
+  var DB=null, OK=false;
+  try { firebase.initializeApp(window.FIREBASE_CONFIG); DB=firebase.firestore(); OK=true; }
+  catch(e){ console.error(e); }
+
+  function esc(s){ return String(s==null?'':s).replace(/[&<>"]/g,function(c){return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c];}); }
+  function fmtDate(ts){ if(!ts||!ts.seconds) return '—'; var d=new Date(ts.seconds*1000); return d.toLocaleString('fr-FR'); }
+  function hoursSince(ts){ if(!ts||!ts.seconds) return Infinity; return (Date.now()/1000 - ts.seconds)/3600; }
+
+  function loadGames(){
+    var box=document.getElementById('games');
+    if(!OK){ box.innerHTML='<div class="empty">Firebase indisponible</div>'; return; }
+    box.innerHTML='<div class="empty">Chargement...</div>';
+    DB.collection('games').get().then(function(snap){
+      if(snap.empty){ box.innerHTML='<div class="empty">Aucune partie active 🎉</div>'; return; }
+      var html='';
+      var games=[];
+      snap.forEach(function(doc){ var d=doc.data(); d._id=doc.id; games.push(d); });
+      games.sort(function(a,b){ return (b.updatedAt&&b.updatedAt.seconds||0)-(a.updatedAt&&a.updatedAt.seconds||0); });
+      games.forEach(function(g){
+        var players=(g.players||[]).map(function(p){return '<span class="pill">'+esc(p.prenom)+' · idx '+p.index+(p.pid===g.host?' 👑':'')+'</span>';}).join('');
+        var badge=g.status==='playing'?'<span class="badge live">en cours</span>':'<span class="badge lobby">salon</span>';
+        // Mini résumé des scores
+        var nbScored=0;
+        if(g.scores){ Object.keys(g.scores).forEach(function(k){ if(g.scores[k].some(function(s){return s!==null;})) nbScored++; }); }
+        html+='<div class="card">'+
+          '<div class="row"><div><strong style="font-size:16px;">'+esc(g.name||g.courseName)+'</strong> '+badge+'<br>'+
+          '<span class="muted">Code <code>'+esc(g._id)+'</code> · '+esc(g.courseName)+' · '+(window.MODES[g.mode]?window.MODES[g.mode].label:g.mode)+'</span></div>'+
+          '<button class="btn btn-red" onclick="delGame(\''+g._id+'\')">🗑 Supprimer</button></div>'+
+          '<div style="margin-top:10px;">'+players+'</div>'+
+          '<div class="muted" style="margin-top:8px;">'+(g.players||[]).length+' joueur(s) · '+nbScored+' ont scoré · créée '+fmtDate(g.createdAt)+' · maj '+fmtDate(g.updatedAt)+'</div>'+
+          '</div>';
+      });
+      box.innerHTML=html;
+    }).catch(function(e){ box.innerHTML='<div class="empty">Erreur : '+esc(e.message)+'</div>'; });
+  }
+
+  function delGame(id){
+    if(!confirm('Supprimer définitivement la partie '+id+' ?')) return;
+    DB.collection('games').doc(id).delete().then(function(){ loadGames(); });
+  }
+
+  function purgeOld(){
+    var h=parseFloat(document.getElementById('purge-hours').value)||6;
+    var res=document.getElementById('purge-result');
+    res.textContent='Analyse...';
+    DB.collection('games').get().then(function(snap){
+      var toDelete=[];
+      snap.forEach(function(doc){
+        var d=doc.data();
+        var ref=d.updatedAt||d.createdAt;
+        if(hoursSince(ref)>h) toDelete.push(doc.id);
+      });
+      if(toDelete.length===0){ res.textContent='Aucune partie à nettoyer ✓'; return; }
+      var done=0;
+      toDelete.forEach(function(id){
+        DB.collection('games').doc(id).delete().then(function(){
+          done++; if(done===toDelete.length){ res.textContent=toDelete.length+' partie(s) supprimée(s) ✓'; loadGames(); }
+        });
+      });
+    });
+  }
+
+  function loadCourses(){
+    var box=document.getElementById('courses');
+    var html='';
+    (window.COURSES||[]).forEach(function(c){
+      html+='<div class="card"><strong>'+esc(c.nom)+'</strong> <span class="muted">('+c.trous+' trous · Par '+c.parTotal+')</span>'+
+        '<table><tr><th>Trou</th>'+c.pars.map(function(_,i){return '<th>'+(i+1)+'</th>';}).join('')+'</tr>'+
+        '<tr><td>Par</td>'+c.pars.map(function(p){return '<td>'+p+'</td>';}).join('')+'</tr></table></div>';
+    });
+    box.innerHTML=html||'<div class="empty">Aucun parcours</div>';
+  }
+
+  loadGames();
+  loadCourses();
+</script>
+</body>
+</html>

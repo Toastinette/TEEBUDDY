@@ -1,0 +1,167 @@
+/* ============================================================================
+   TEEBUDDY — DESIGN
+   Tout l'aspect visuel est ici : couleurs, polices, mise en page.
+   Pour changer une couleur, un espacement, une taille → c'est ici uniquement.
+============================================================================ */
+
+/* ── Reset ─────────────────────────────────────────────────────────────── */
+*, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+html, body { height: 100%; overflow: hidden; -webkit-text-size-adjust: 100%; }
+body {
+  font-family: 'Barlow', sans-serif;
+  background: var(--bg);
+  color: var(--text);
+  -webkit-tap-highlight-color: transparent;
+  overscroll-behavior: none;
+  -webkit-font-smoothing: antialiased;
+}
+
+/* ── Palette & variables ───────────────────────────────────────────────── */
+:root {
+  --green:  #2ECC71;
+  --red:    #E74C3C;
+  --orange: #E67E22;
+  --gold:   #B8960C;
+  --bg:     #F0F0EE;
+  --card:   #FFFFFF;
+  --text:   #1A1A1A;
+  --muted:  #888888;
+  --border: #E0E0DC;
+  --r:      50px;   /* rayon des boutons capsule */
+  --rc:     20px;   /* rayon des cartes */
+}
+
+/* ── App shell ─────────────────────────────────────────────────────────── */
+#app { width: 100%; height: 100vh; height: 100dvh; overflow: hidden; position: relative; }
+
+/* ── Écrans (navigation SPA) ───────────────────────────────────────────── */
+.screen {
+  position: absolute; inset: 0;
+  display: flex; flex-direction: column;
+  overflow-y: auto; overflow-x: hidden;
+  opacity: 0; pointer-events: none;
+  transform: translateY(8px);
+  transition: opacity .25s ease, transform .25s ease;
+  -webkit-overflow-scrolling: touch;
+}
+.screen.active { opacity: 1; pointer-events: all; transform: translateY(0); }
+
+/* ── Typographie utilitaire ────────────────────────────────────────────── */
+.D { font-family: 'Barlow Condensed', sans-serif; font-weight: 900; text-transform: uppercase; letter-spacing: .02em; }
+.L { font-family: 'Barlow Condensed', sans-serif; font-weight: 700; text-transform: uppercase; letter-spacing: .08em; font-size: 11px; color: var(--muted); }
+
+/* ── Avatars ───────────────────────────────────────────────────────────── */
+.av {
+  border-radius: 50%;
+  display: flex; align-items: center; justify-content: center;
+  font-family: 'Barlow Condensed', sans-serif; font-weight: 900;
+  color: #fff; flex-shrink: 0; overflow: hidden;
+}
+
+/* ── Boutons ───────────────────────────────────────────────────────────── */
+.btn {
+  display: flex; align-items: center; justify-content: center;
+  border: none; cursor: pointer;
+  font-family: 'Barlow Condensed', sans-serif; font-weight: 800;
+  text-transform: uppercase; letter-spacing: .05em;
+  -webkit-tap-highlight-color: transparent;
+  transition: transform .1s, opacity .1s;
+  -webkit-appearance: none; appearance: none;
+}
+.btn:active { transform: scale(.96); opacity: .85; }
+
+.B-dark      { background: var(--text); color: #fff; border-radius: var(--r); font-size: 17px; padding: 19px 28px; width: 100%; }
+.B-green     { background: var(--green); color: #fff; border-radius: var(--r); font-size: 17px; padding: 19px 28px; width: 100%; }
+.B-out       { background: transparent; color: var(--text); border: 2.5px solid var(--text); border-radius: var(--r); font-size: 17px; padding: 17px 28px; width: 100%; }
+.B-pill      { background: var(--text); color: #fff; border-radius: var(--r); font-size: 14px; padding: 13px 20px; }
+.B-pill-out  { background: transparent; color: var(--text); border: 2px solid var(--border); border-radius: var(--r); font-size: 14px; padding: 11px 20px; }
+.B-ico       { width: 44px; height: 44px; border-radius: 50%; background: var(--text); border: none; cursor: pointer; display: flex; align-items: center; justify-content: center; color: #fff; flex-shrink: 0; -webkit-tap-highlight-color: transparent; }
+
+.x-btn { border: none; background: none; color: var(--red); font-size: 22px; cursor: pointer; padding: 0 4px; line-height: 1; flex-shrink: 0; }
+
+/* ── Cartes ────────────────────────────────────────────────────────────── */
+.card { background: var(--card); border-radius: var(--rc); padding: 20px; box-shadow: 0 2px 14px rgba(0,0,0,.07); }
+
+/* ── Champs de saisie ──────────────────────────────────────────────────── */
+.inp {
+  width: 100%;
+  border: 2.5px solid var(--border); border-radius: var(--r);
+  padding: 15px 20px;
+  font-family: 'Barlow Condensed', sans-serif; font-size: 16px; font-weight: 700;
+  text-transform: uppercase; letter-spacing: .05em;
+  background: #fff; color: var(--text);
+  outline: none; transition: border-color .2s;
+  -webkit-appearance: none;
+}
+.inp:focus { border-color: var(--green); }
+.inp::placeholder { color: var(--muted); font-weight: 600; }
+/* Champ texte normal (nom de partie) : pas en majuscules */
+.inp.normal { text-transform: none; letter-spacing: normal; font-weight: 600; }
+
+/* ── Sélecteur de trous ────────────────────────────────────────────────── */
+.holes-row { display: flex; gap: 6px; overflow-x: auto; padding: 0 16px; scrollbar-width: none; -webkit-overflow-scrolling: touch; }
+.holes-row::-webkit-scrollbar { display: none; }
+.hc {
+  min-width: 34px; height: 34px; border-radius: 17px;
+  display: flex; align-items: center; justify-content: center;
+  font-family: 'Barlow Condensed', sans-serif; font-weight: 700; font-size: 13px;
+  background: #fff; color: var(--muted); border: 2px solid var(--border);
+  cursor: pointer; flex-shrink: 0; transition: all .15s;
+  -webkit-tap-highlight-color: transparent;
+}
+.hc.active      { background: var(--text); color: #fff; border-color: var(--text); transform: scale(1.1); }
+.hc.done        { background: var(--green); color: #fff; border-color: var(--green); }
+.hc.active.done { background: var(--green); border-color: var(--text); }
+
+/* ── Table des scores ──────────────────────────────────────────────────── */
+.st { width: 100%; border-collapse: collapse; font-family: 'Barlow Condensed', sans-serif; }
+.st th { font-size: 10px; font-weight: 700; color: var(--muted); text-transform: uppercase; padding: 3px 1px; text-align: center; }
+.st td { text-align: center; padding: 4px 1px; font-size: 14px; font-weight: 700; height: 30px; }
+.tot { background: #F5F5F3; font-weight: 900; font-size: 15px; }
+
+/* ── Toast (notifications) ─────────────────────────────────────────────── */
+#toast {
+  position: fixed; bottom: 32px; left: 50%;
+  transform: translateX(-50%) translateY(16px);
+  background: var(--text); color: #fff;
+  padding: 13px 22px; border-radius: 14px;
+  font-family: 'Barlow Condensed', sans-serif; font-weight: 700; font-size: 15px;
+  opacity: 0; transition: all .3s ease; z-index: 9999;
+  max-width: 88vw; text-align: center;
+  box-shadow: 0 4px 20px rgba(0,0,0,.3); pointer-events: none;
+}
+#toast.show { opacity: 1; transform: translateX(-50%) translateY(0); }
+#toast.ok   { background: var(--green); }
+
+/* ── Indicateur live ───────────────────────────────────────────────────── */
+#live-dot { width: 8px; height: 8px; border-radius: 50%; background: #fff; display: inline-block; margin-right: 6px; opacity: .4; transition: opacity .3s; }
+
+/* ── En-tête accueil : logo centré ─────────────────────────────────────── */
+.home-head {
+  position: relative;
+  padding: 56px 24px 0;
+  display: flex; align-items: flex-start; justify-content: center;
+  min-height: 120px;
+}
+.home-head .logo { width: 130px; height: auto; }
+.home-head .head-actions {
+  position: absolute; top: 56px; right: 24px;
+  display: flex; flex-direction: column; gap: 10px;
+}
+
+/* ── En-tête générique (titre + retour) ────────────────────────────────── */
+.head {
+  padding: 56px 24px 20px;
+  display: flex; align-items: center; justify-content: space-between;
+}
+
+/* ── Logo (commun) ─────────────────────────────────────────────────────── */
+.logo { display: block; }
+.logo.white { filter: brightness(0) invert(1); }
+
+/* ── Bandeau vert (salon, scores, fin) ─────────────────────────────────── */
+.banner { background: var(--green); padding: 56px 24px 24px; }
+
+/* ── Petites aides ─────────────────────────────────────────────────────── */
+.hint { padding: 14px 16px; background: rgba(46,204,113,.08); border-radius: 14px; font-size: 13px; color: var(--muted); line-height: 1.5; }
+.spacer-44 { width: 44px; }

@@ -1,0 +1,757 @@
+/* ============================================================================
+   TEEBUDDY — LOGIQUE APPLICATIVE
+   Navigation, Firebase, salon, scores. La "mécanique" de l'app.
+   Les données (parcours, modes, config Firebase) sont dans config.js.
+   Le design est dans style.css.
+============================================================================ */
+
+/* ── Firebase init (protégé) ───────────────────────────────────────────── */
+var DB = null, FB_OK = false;
+try {
+  firebase.initializeApp(window.FIREBASE_CONFIG);
+  DB = firebase.firestore();
+  FB_OK = true;
+} catch (e) { console.error("Firebase init:", e); }
+
+/* Raccourcis vers la config */
+var COURSES = window.COURSES || [];
+var MODES   = window.MODES || {};
+
+/* ── État global ────────────────────────────────────────────────────────── */
+var S = {
+  player: null,       // { prenom, nom, index, pid, avatar? }
+  game:   null,       // document Firestore de la partie
+  gameId: null,       // identifiant du document (code court)
+  hole:   0,
+  scores: Array(18).fill(null),
+  hist:   ['s-home'],
+  extras: [],         // joueurs ajoutés manuellement (1 seul téléphone)
+  unsub:  null,       // listener partie en cours
+  unsubList: null,    // listener liste des parties ouvertes
+  notified: {},
+  started: false
+};
+var selCourse = (COURSES[0] && COURSES[0].id) || null;
+
+/* ── Boot ───────────────────────────────────────────────────────────────── */
+function boot() {
+  applyLogos();
+  if (!FB_OK) { showScreen('s-home'); toast('⚠️ Connexion Firebase indisponible'); }
+
+  var p = lget('tb_player');
+  if (p) { S.player = p; updatePlayerUI(); showScreen('s-home'); }
+  else showScreen('s-onboard');
+
+  var sess = lget('tb_session');
+  if (sess && sess.id) {
+    S.gameId = sess.id;
+    S.hole   = sess.hole || 0;
+    S.scores = sess.scores || Array(18).fill(null);
+    if (FB_OK) attachGameListener(sess.id);
+  }
+
+  buildCourseList();
+  renderPlayerList();
+  renderHomeParties();
+  if (FB_OK) attachOpenGamesListener();
+}
+function applyLogos() {
+  var l = document.querySelectorAll('img.logo');
+  for (var i = 0; i < l.length; i++) l[i].src = 'logo.png';
+}
+if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', boot);
+else boot();
+
+/* ── Navigation ─────────────────────────────────────────────────────────── */
+function showScreen(id) {
+  var sc = document.querySelectorAll('.screen');
+  for (var i = 0; i < sc.length; i++) sc[i].classList.remove('active');
+  var el = document.getElementById(id);
+  if (el) { el.classList.add('active'); el.scrollTop = 0; }
+  if (S.hist[S.hist.length - 1] !== id) S.hist.push(id);
+  if (id === 's-scores') refreshScores();
+  if (id === 's-game')   refreshGameUI();
+  if (id === 's-profil') fillProfilForm();
+  if (id === 's-salon')  renderSalon();
+  if (id === 's-settings') renderSettings();
+}
+function go(id) { showScreen(id); }
+function back() {
+  if (S.hist.length > 1) {
+    S.hist.pop();
+    var prev = S.hist[S.hist.length - 1];
+    var sc = document.querySelectorAll('.screen');
+    for (var i = 0; i < sc.length; i++) sc[i].classList.remove('active');
+    var el = document.getElementById(prev);
+    if (el) { el.classList.add('active'); el.scrollTop = 0; }
+    if (prev === 's-game')   refreshGameUI();
+    if (prev === 's-scores') refreshScores();
+    if (prev === 's-salon')  renderSalon();
+  } else go('s-home');
+}
+
+/* ── Avatar (compression côté navigateur) ──────────────────────────────── */
+function onAvatarPick(input) {
+  var file = input.files && input.files[0];
+  if (!file) return;
+  if (file.type.indexOf('image/') !== 0) { toast('Choisis une image'); return; }
+  var reader = new FileReader();
+  reader.onload = function (e) {
+    var img = new Image();
+    img.onload = function () {
+      var size = 128;
+      var cv = document.createElement('canvas'); cv.width = size; cv.height = size;
+      var ctx = cv.getContext('2d');
+      var min = Math.min(img.width, img.height);
+      var sx = (img.width - min) / 2, sy = (img.height - min) / 2;
+      ctx.drawImage(img, sx, sy, min, min, 0, 0, size, size);
+      var q = 0.6, url = cv.toDataURL('image/jpeg', q);
+      while (url.length > 16000 && q > 0.3) { q -= 0.1; url = cv.toDataURL('image/jpeg', q); }
+      if (!S.player) S.player = {};
+      S.player.avatar = url;
+      lset('tb_player', S.player);
+      updatePlayerUI(); fillProfilForm();
+      toast('Photo ajoutée ✓', true);
+    };
+    img.src = e.target.result;
+  };
+  reader.readAsDataURL(file);
+}
+function removeAvatar() {
+  if (S.player) { delete S.player.avatar; lset('tb_player', S.player); updatePlayerUI(); fillProfilForm(); toast('Photo retirée'); }
+}
+function avatarHTML(p, size, bg, col) {
+  size = size || 34; bg = bg || 'var(--green)'; col = col || '#fff';
+  if (p && p.avatar) {
+    return '<div style="width:' + size + 'px;height:' + size + 'px;border-radius:50%;overflow:hidden;flex-shrink:0;background:#eee;"><img src="' + p.avatar + '" style="width:100%;height:100%;object-fit:cover;display:block;" alt=""></div>';
+  }
+  var ini = ((p && p.prenom) ? p.prenom[0] : '?').toUpperCase();
+  return '<div class="av" style="width:' + size + 'px;height:' + size + 'px;font-size:' + Math.round(size * 0.44) + 'px;background:' + bg + ';color:' + col + ';">' + ini + '</div>';
+}
+function setAvatar(id, p, bg) {
+  var el = document.getElementById(id); if (!el) return;
+  if (p && p.avatar) {
+    el.style.background = 'transparent'; el.style.overflow = 'hidden';
+    el.innerHTML = '<img src="' + p.avatar + '" style="width:100%;height:100%;object-fit:cover;border-radius:50%;display:block;" alt="">';
+  } else {
+    el.style.background = bg || 'var(--green)';
+    el.innerHTML = ((p && p.prenom) ? p.prenom[0] : '?').toUpperCase();
+  }
+}
+
+/* ── Onboarding ─────────────────────────────────────────────────────────── */
+function saveOnboard() {
+  var pr = trim('ob-prenom'), no = trim('ob-nom'), ix = parseFloat(val('ob-index')) || 0;
+  if (!pr) { toast('Entre ton prénom 👋'); return; }
+  S.player = { prenom: pr, nom: no, index: ix, pid: 'p_' + Date.now() + '_' + Math.random().toString(36).slice(2, 6) };
+  lset('tb_player', S.player); updatePlayerUI();
+  toast('Bienvenue ' + pr + ' ! ⛳', true);
+  setTimeout(function () { go('s-home'); }, 600);
+}
+
+/* ── Profil ─────────────────────────────────────────────────────────────── */
+function fillProfilForm() {
+  if (!S.player) return;
+  setv('pf-prenom', S.player.prenom || '');
+  setv('pf-nom', S.player.nom || '');
+  setv('pf-index', S.player.index || '');
+  setAvatar('pf-av', S.player, 'var(--green)');
+  txt('pf-name', fullname(S.player));
+  txt('pf-idx', S.player.index || '—');
+  var rm = document.getElementById('pf-remove-av');
+  if (rm) rm.style.display = S.player.avatar ? 'block' : 'none';
+}
+function saveProfil() {
+  var pr = trim('pf-prenom'), no = trim('pf-nom'), ix = parseFloat(val('pf-index')) || 0;
+  if (!pr) { toast('Entre ton prénom'); return; }
+  S.player = Object.assign({}, S.player, { prenom: pr, nom: no, index: ix });
+  lset('tb_player', S.player); updatePlayerUI(); fillProfilForm();
+  toast('Profil mis à jour ✓', true);
+  setTimeout(back, 700);
+}
+function updatePlayerUI() {
+  if (!S.player) return;
+  setAvatar('hb-av', S.player, 'rgba(255,255,255,.3)');
+  txt('hb-nom', fullname(S.player).toUpperCase());
+  txt('hb-idx', S.player.index || '—');
+  setAvatar('g-av', S.player, 'var(--green)');
+  txt('g-name', S.player.prenom.toUpperCase());
+}
+
+/* ── Création de partie ─────────────────────────────────────────────────── */
+function buildCourseList() {
+  var el = document.getElementById('list-parcours'); if (!el) return; el.innerHTML = '';
+  COURSES.forEach(function (c) {
+    var b = document.createElement('button');
+    b.className = 'btn ' + (c.id === selCourse ? 'B-pill' : 'B-pill-out');
+    b.setAttribute('data-c', c.id); b.id = 'c-' + c.id;
+    b.style.cssText = 'justify-content:flex-start;gap:10px;width:100%;';
+    b.textContent = '⛳ ' + c.nom + ' · ' + c.trous + ' trous · Par ' + c.parTotal;
+    b.onclick = function () { selCourse = c.id; hlCourse(); };
+    el.appendChild(b);
+  });
+}
+function hlCourse() {
+  document.querySelectorAll('[data-c]').forEach(function (b) {
+    b.className = 'btn B-pill-out'; b.style.cssText = 'justify-content:flex-start;gap:10px;width:100%;';
+  });
+  var s = document.getElementById('c-' + selCourse);
+  if (s) { s.className = 'btn B-pill'; s.style.cssText = 'justify-content:flex-start;gap:10px;width:100%;'; }
+}
+function showAddPlayer() { document.getElementById('form-add').style.display = 'block'; document.getElementById('add-prenom').focus(); }
+function hideAddPlayer() { document.getElementById('form-add').style.display = 'none'; }
+function addPlayer() {
+  var pr = trim('add-prenom'), ix = parseFloat(val('add-index')) || 0;
+  if (!pr) { toast('Entre un prénom'); return; }
+  S.extras.push({ prenom: pr, index: ix, id: 'x' + Date.now(), pid: 'x_' + Date.now() + '_' + Math.random().toString(36).slice(2, 5) });
+  setv('add-prenom', ''); setv('add-index', '');
+  hideAddPlayer(); renderPlayerList();
+}
+function removePlayerExtra(id) { S.extras = S.extras.filter(function (j) { return j.id !== id; }); renderPlayerList(); }
+function renderPlayerList() {
+  var el = document.getElementById('list-joueurs'); if (!el) return; el.innerHTML = '';
+  var all = S.player ? [Object.assign({}, S.player, { self: true, id: 'self' })] : [];
+  all = all.concat(S.extras);
+  all.forEach(function (j) {
+    var d = document.createElement('div');
+    d.style.cssText = 'display:flex;align-items:center;gap:10px;padding:12px 14px;background:#fff;border-radius:14px;';
+    d.innerHTML = avatarHTML(j, 34) +
+      '<div style="flex:1;font-family:\'Barlow Condensed\',sans-serif;font-weight:700;font-size:15px;text-transform:uppercase;">' + fullname(j) + '</div>' +
+      '<div style="font-size:12px;color:var(--muted);">Idx ' + j.index + '</div>' +
+      (j.self ? '<span style="font-size:11px;color:var(--green);font-family:\'Barlow Condensed\',sans-serif;font-weight:700;flex-shrink:0;">MOI</span>'
+              : '<button onclick="removePlayerExtra(\'' + j.id + '\')" class="x-btn">×</button>');
+    el.appendChild(d);
+  });
+}
+
+/* Génère un identifiant de partie court à 4 chiffres, non déjà pris */
+function newGameId() {
+  return String(Math.floor(1000 + Math.random() * 9000));
+}
+
+function createGame() {
+  if (!S.player) { toast('Crée ton profil d\'abord 👆'); go('s-profil'); return; }
+  if (!FB_OK) { toast('⚠️ Firebase indisponible'); return; }
+  var course = COURSES.find(function (c) { return c.id === selCourse; });
+  if (!course) { toast('Sélectionne un parcours'); return; }
+  var nom = trim('new-name') || ('Partie de ' + S.player.prenom);
+
+  var me = { prenom: S.player.prenom, nom: S.player.nom || '', index: S.player.index, pid: S.player.pid };
+  if (S.player.avatar) me.avatar = S.player.avatar;
+  var players = [me].concat(S.extras.map(function (e) { return { prenom: e.prenom, index: e.index, pid: e.pid }; }));
+
+  var id = newGameId();
+  var scores = {}; players.forEach(function (j) { scores[j.pid] = Array(18).fill(null); });
+
+  var data = {
+    name: nom,
+    courseId: course.id, courseName: course.nom,
+    coursePars: course.pars, parTotal: course.parTotal,
+    mode: 'stroke', host: S.player.pid,
+    players: players, teams: [], scores: scores,
+    status: 'lobby',
+    createdAt: firebase.firestore.FieldValue.serverTimestamp(),
+    updatedAt: firebase.firestore.FieldValue.serverTimestamp()
+  };
+
+  toast('Création...');
+  DB.collection('games').doc(id).set(data).then(function () {
+    S.game = data; S.gameId = id; S.hole = 0; S.started = false;
+    S.scores = Array(18).fill(null); S.notified = {};
+    lset('tb_session', { id: id, hole: 0, scores: S.scores });
+    attachGameListener(id);
+    S.extras = []; renderPlayerList();
+    setv('new-name', '');
+    go('s-salon'); renderHomeParties();
+  }).catch(function (e) { console.error(e); toast('Erreur création'); });
+}
+
+/* ── Rejoindre depuis la liste de l'accueil ─────────────────────────────── */
+function joinGameById(id) {
+  if (!FB_OK) { toast('⚠️ Firebase indisponible'); return; }
+  DB.collection('games').doc(id).get().then(function (snap) {
+    if (!snap.exists) { toast('Cette partie n\'existe plus'); return; }
+    var data = snap.data();
+    var myPid = S.player.pid;
+    var inGame = data.players.some(function (p) { return p.pid === myPid; });
+    var chain = Promise.resolve();
+    if (!inGame) {
+      var me = { prenom: S.player.prenom, nom: S.player.nom || '', index: S.player.index, pid: myPid };
+      if (S.player.avatar) me.avatar = S.player.avatar;
+      var np = data.players.concat([me]);
+      var ns = Object.assign({}, data.scores); ns[myPid] = Array(18).fill(null);
+      chain = DB.collection('games').doc(id).update({ players: np, scores: ns, updatedAt: firebase.firestore.FieldValue.serverTimestamp() });
+    }
+    chain.then(function () {
+      S.gameId = id; S.hole = 0; S.started = (data.status === 'playing');
+      S.scores = (data.scores && data.scores[myPid]) || Array(18).fill(null);
+      S.notified = {};
+      lset('tb_session', { id: id, hole: 0, scores: S.scores });
+      attachGameListener(id);
+      if (data.status === 'playing') { buildHolePicker(); go('s-game'); }
+      else go('s-salon');
+      renderHomeParties();
+      toast('Partie rejointe ! 🎉', true);
+    });
+  }).catch(function (e) { console.error(e); toast('Erreur connexion'); });
+}
+
+/* ── Listener : liste des parties ouvertes (accueil) ───────────────────── */
+function attachOpenGamesListener() {
+  if (S.unsubList) S.unsubList();
+  S.unsubList = DB.collection('games').onSnapshot(function (snap) {
+    var games = [];
+    snap.forEach(function (doc) {
+      var d = doc.data(); d._id = doc.id;
+      games.push(d);
+    });
+    renderOpenGames(games);
+  }, function (err) { console.error('open games', err); });
+}
+function renderOpenGames(games) {
+  var box = document.getElementById('open-games');
+  var empty = document.getElementById('open-empty');
+  if (!box) return;
+
+  // Exclure la partie où je suis déjà (affichée dans "ma partie en cours")
+  var others = games.filter(function (g) {
+    if (g._id === S.gameId) return false;
+    // Ne montrer que les parties non vides
+    return g.players && g.players.length > 0;
+  });
+  // Trier par date de création récente
+  others.sort(function (a, b) {
+    var ta = a.createdAt && a.createdAt.seconds ? a.createdAt.seconds : 0;
+    var tb = b.createdAt && b.createdAt.seconds ? b.createdAt.seconds : 0;
+    return tb - ta;
+  });
+
+  if (others.length === 0) {
+    box.innerHTML = '';
+    if (empty) empty.style.display = 'block';
+    return;
+  }
+  if (empty) empty.style.display = 'none';
+
+  box.innerHTML = '';
+  others.forEach(function (g) {
+    var statusTxt = g.status === 'playing' ? 'en cours' : 'salon ouvert';
+    var mode = (MODES[g.mode] || { label: '' }).label;
+    var host = (g.players.find(function (p) { return p.pid === g.host; }) || {}).prenom || '';
+    var avatars = g.players.slice(0, 4).map(function (p) { return avatarHTML(p, 28, 'var(--bg)', 'var(--text)'); }).join('');
+    var more = g.players.length > 4 ? '<span style="font-size:11px;color:var(--muted);margin-left:4px;">+' + (g.players.length - 4) + '</span>' : '';
+
+    var card = document.createElement('div');
+    card.className = 'card';
+    card.style.cssText = 'cursor:pointer;';
+    card.onclick = function () { joinGameById(g._id); };
+    card.innerHTML =
+      '<div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:10px;">' +
+        '<div><div style="font-family:\'Barlow Condensed\',sans-serif;font-weight:900;font-size:17px;text-transform:uppercase;">' + esc(g.name || g.courseName) + '</div>' +
+        '<div style="font-size:12px;color:var(--muted);">' + esc(g.courseName) + ' · ' + mode + ' · ' + statusTxt + '</div></div>' +
+        '<div style="background:var(--green);color:#fff;font-family:\'Barlow Condensed\',sans-serif;font-weight:800;font-size:12px;padding:6px 12px;border-radius:20px;flex-shrink:0;">Rejoindre</div>' +
+      '</div>' +
+      '<div style="display:flex;align-items:center;gap:4px;">' + avatars + more +
+        '<span style="font-size:12px;color:var(--muted);margin-left:8px;">' + g.players.length + ' joueur' + (g.players.length > 1 ? 's' : '') + (host ? ' · hôte ' + esc(host) : '') + '</span>' +
+      '</div>';
+    box.appendChild(card);
+  });
+}
+
+/* ── Listener : partie en cours ────────────────────────────────────────── */
+function attachGameListener(id) {
+  if (S.unsub) S.unsub();
+  S.unsub = DB.collection('games').doc(id).onSnapshot(function (snap) {
+    if (!snap.exists) {
+      // La partie a été supprimée (tous les joueurs sont partis)
+      if (S.gameId === id) {
+        toast('La partie a été clôturée');
+        clearSessionLocal();
+        go('s-home');
+      }
+      return;
+    }
+    S.game = snap.data();
+    pulseLive();
+    if (S.game.status === 'playing' && !S.started) {
+      S.started = true; buildHolePicker(); go('s-game');
+      toast('La partie commence ! ⛳', true);
+      return;
+    }
+    renderHomeParties();
+    if (isActive('s-salon'))    renderSalon();
+    if (isActive('s-scores'))   refreshScores();
+    if (isActive('s-settings')) renderSettings();
+  }, function (err) { console.error('game', err); });
+}
+function isActive(id) { var e = document.getElementById(id); return e && e.classList.contains('active'); }
+function pulseLive() {
+  var d = document.getElementById('live-dot'); if (!d) return;
+  d.style.opacity = '1'; clearTimeout(window._pl);
+  window._pl = setTimeout(function () { d.style.opacity = '.4'; }, 400);
+}
+
+/* ── Salon ──────────────────────────────────────────────────────────────── */
+function renderSalon() {
+  var g = S.game; if (!g) return;
+  var isHost = g.host === S.player.pid;
+  txt('sl-name', g.name || g.courseName);
+  txt('sl-parcours', g.courseName);
+
+  var jl = document.getElementById('sl-joueurs'); jl.innerHTML = '';
+  (g.players || []).forEach(function (j) {
+    var me = j.pid === S.player.pid;
+    var crown = j.pid === g.host ? ' <span style="font-size:10px;opacity:.8;">👑</span>' : '';
+    var d = document.createElement('div');
+    d.style.cssText = 'display:flex;align-items:center;gap:10px;padding:12px 14px;background:rgba(255,255,255,.15);border-radius:12px;';
+    d.innerHTML = avatarHTML(j, 34, 'rgba(255,255,255,.3)') +
+      '<div style="font-family:\'Barlow Condensed\',sans-serif;font-weight:700;font-size:15px;text-transform:uppercase;color:#fff;">' + j.prenom + crown + (me ? ' <span style="font-size:11px;opacity:.7;">(moi)</span>' : '') + '</div>' +
+      '<div style="margin-left:auto;font-size:12px;color:rgba(255,255,255,.7);">Index ' + j.index + '</div>';
+    jl.appendChild(d);
+  });
+  txt('sl-count', (g.players || []).length);
+
+  renderModeButtons('sl-mode-buttons', isHost);
+  document.getElementById('sl-mode-hint').style.display = isHost ? 'none' : 'block';
+
+  var ew = document.getElementById('sl-equipes-wrap');
+  if (MODES[g.mode].teams) {
+    ew.style.display = 'block';
+    renderTeams('sl-equipes');
+    document.getElementById('sl-shuffle').style.display = isHost ? 'block' : 'none';
+  } else ew.style.display = 'none';
+
+  var launchBtn = document.getElementById('sl-launch');
+  var waitMsg = document.getElementById('sl-wait');
+  if (isHost) { launchBtn.style.display = 'block'; waitMsg.style.display = 'none'; }
+  else {
+    launchBtn.style.display = 'none'; waitMsg.style.display = 'block';
+    var hn = (g.players.find(function (p) { return p.pid === g.host; }) || {}).prenom || 'l\'hôte';
+    txt('sl-wait-txt', 'En attente du lancement par ' + hn + '...');
+  }
+}
+
+/* Boutons de mode réutilisables (salon + réglages) */
+function renderModeButtons(containerId, editable) {
+  var wrap = document.getElementById(containerId); if (!wrap) return; wrap.innerHTML = '';
+  Object.keys(MODES).forEach(function (m) {
+    var active = S.game.mode === m;
+    var b = document.createElement('button');
+    b.className = 'btn ' + (active ? 'B-pill' : 'B-pill-out');
+    b.style.cssText = 'justify-content:flex-start;gap:8px;width:100%;' + (editable ? '' : 'opacity:' + (active ? '1' : '.5') + ';');
+    b.textContent = MODES[m].icon + ' ' + MODES[m].label;
+    if (editable) b.onclick = function () { changeMode(m); };
+    else b.disabled = true;
+    wrap.appendChild(b);
+  });
+}
+function renderTeams(containerId) {
+  var el = document.getElementById(containerId); if (!el) return; el.innerHTML = '';
+  var teams = S.game.teams || [];
+  if (teams.length === 0) {
+    el.innerHTML = '<div style="padding:14px;text-align:center;color:var(--muted);font-size:13px;">Appuie sur « Former les équipes » pour répartir les joueurs.</div>';
+    return;
+  }
+  teams.forEach(function (t, i) {
+    var d = document.createElement('div'); d.className = 'card';
+    d.style.cssText = 'display:flex;align-items:center;gap:12px;';
+    var n0 = t.players[0] ? t.players[0].prenom : '?';
+    var n1 = t.players[1] ? t.players[1].prenom : '?';
+    var ix = ((t.players[0] ? t.players[0].index : 0) + (t.players[1] ? t.players[1].index : 0)).toFixed(1);
+    d.innerHTML = '<div style="font-family:\'Barlow Condensed\',sans-serif;font-weight:900;font-size:22px;color:var(--green);min-width:32px;">' + (i + 1) + '</div>' +
+      '<div style="flex:1;"><div style="font-family:\'Barlow Condensed\',sans-serif;font-weight:800;font-size:16px;text-transform:uppercase;">' + n0 + ' &amp; ' + n1 + '</div>' +
+      '<div style="font-size:12px;color:var(--muted);">Index cumulé : ' + ix + '</div></div>';
+    el.appendChild(d);
+  });
+}
+function changeMode(m) {
+  if (!FB_OK || !S.game) return;
+  if (S.game.host !== S.player.pid) { toast('Seul l\'hôte peut changer le mode'); return; }
+  var upd = { mode: m, updatedAt: firebase.firestore.FieldValue.serverTimestamp() };
+  upd.teams = MODES[m].teams ? autoTeams(S.game.players) : [];
+  DB.collection('games').doc(S.gameId).update(upd);
+}
+function autoTeams(players) {
+  var sh = (players || []).slice().sort(function () { return Math.random() - .5; });
+  var teams = [];
+  for (var i = 0; i < sh.length; i += 2) teams.push({ players: [sh[i], sh[i + 1] || null] });
+  return teams;
+}
+function shuffleTeams() {
+  if (!FB_OK || S.game.host !== S.player.pid) return;
+  DB.collection('games').doc(S.gameId).update({ teams: autoTeams(S.game.players) }).then(function () {
+    toast('Équipes mélangées 🔀', true);
+  });
+}
+function launchGame() {
+  if (!FB_OK || !S.game) return;
+  if (S.game.host !== S.player.pid) { toast('Seul l\'hôte peut lancer'); return; }
+  if (MODES[S.game.mode].teams) {
+    var n = (S.game.players || []).length;
+    if (n < 2) { toast('Ajoute au moins 2 joueurs'); return; }
+    if (n % 2) { toast('Nombre pair de joueurs requis'); return; }
+    if (!S.game.teams || S.game.teams.length === 0) { toast('Forme les équipes d\'abord 🔀'); return; }
+  }
+  DB.collection('games').doc(S.gameId).update({ status: 'playing', updatedAt: firebase.firestore.FieldValue.serverTimestamp() });
+}
+
+/* ── Réglages en cours de partie ───────────────────────────────────────── */
+function renderSettings() {
+  var g = S.game; if (!g) return;
+  var isHost = g.host === S.player.pid;
+  txt('set-name', g.name || g.courseName);
+  document.getElementById('set-host-only').style.display = isHost ? 'block' : 'none';
+  document.getElementById('set-not-host').style.display = isHost ? 'none' : 'block';
+  if (isHost) {
+    renderModeButtons('set-mode-buttons', true);
+    var ew = document.getElementById('set-equipes-wrap');
+    if (MODES[g.mode].teams) { ew.style.display = 'block'; renderTeams('set-equipes'); }
+    else ew.style.display = 'none';
+  }
+}
+
+/* ── Jeu : saisie ───────────────────────────────────────────────────────── */
+function buildHolePicker() {
+  var el = document.getElementById('g-holes'); if (!el) return; el.innerHTML = '';
+  for (var i = 0; i < 18; i++) {
+    var c = document.createElement('button');
+    c.className = 'hc' + (i === S.hole ? ' active' : '') + (S.scores[i] !== null ? ' done' : '');
+    c.textContent = i + 1;
+    (function (idx) { c.onclick = function () { leaveHole(); S.hole = idx; refreshGameUI(); }; })(i);
+    el.appendChild(c);
+  }
+}
+function refreshGameUI() {
+  if (!S.game) return;
+  var t = S.hole, par = S.game.coursePars[t], sc = S.scores[t];
+  txt('g-hn', t + 1); txt('g-par', par);
+  var sEl = document.getElementById('g-score'), lEl = document.getElementById('g-slabel'), eEl = document.getElementById('g-ecart');
+  if (sc === null) {
+    sEl.textContent = '—'; sEl.style.color = 'var(--muted)';
+    lEl.textContent = ''; eEl.textContent = 'Appuie sur + ou − pour scorer'; eEl.style.color = 'var(--muted)';
+  } else {
+    var e = sc - par, info = scoreInfo(e);
+    sEl.textContent = sc; sEl.style.color = info.color;
+    lEl.textContent = info.label; lEl.style.color = info.color;
+    eEl.textContent = e === 0 ? 'Égal au par' : (e > 0 ? '+' : '') + e + ' / Par ' + par;
+    eEl.style.color = e <= 0 ? 'var(--green)' : 'var(--red)';
+  }
+  var pv = document.getElementById('g-prev'); if (pv) pv.style.opacity = t === 0 ? '.4' : '1';
+  buildHolePicker();
+}
+function scoreInfo(e) {
+  if (e <= -3) return { label: 'ALBATROS 🦅', color: 'var(--gold)' };
+  if (e === -2) return { label: 'EAGLE 🦅',   color: 'var(--gold)' };
+  if (e === -1) return { label: 'BIRDIE 🐦',  color: 'var(--green)' };
+  if (e === 0)  return { label: 'PAR',          color: 'var(--text)' };
+  if (e === 1)  return { label: 'BOGEY',        color: 'var(--orange)' };
+  if (e === 2)  return { label: 'DOUBLE BOGEY', color: 'var(--red)' };
+  return          { label: 'TRIPLE BOGEY +',   color: '#8B0000' };
+}
+function chScore(d) {
+  if (!S.game) return;
+  var t = S.hole, par = S.game.coursePars[t], cur = S.scores[t];
+  var nxt = cur === null ? (d > 0 ? par : Math.max(1, par - 1)) : Math.max(1, cur + d);
+  S.scores[t] = nxt; S.notified[t] = false;
+  saveScore(); refreshGameUI();
+}
+function saveScore() {
+  lset('tb_session', { id: S.gameId, hole: S.hole, scores: S.scores });
+  if (!FB_OK || !S.gameId || !S.player) return;
+  var upd = {}; upd['scores.' + S.player.pid] = S.scores;
+  upd.updatedAt = firebase.firestore.FieldValue.serverTimestamp();
+  DB.collection('games').doc(S.gameId).update(upd).catch(function (e) { console.error(e); });
+}
+function leaveHole() {
+  var t = S.hole, sc = S.scores[t];
+  if (sc === null || S.notified[t]) return;
+  var e = sc - S.game.coursePars[t], nom = S.player ? S.player.prenom : '';
+  if (e <= -2) { toast('🦅 Eagle ! Incroyable ' + nom + ' !', true); S.notified[t] = true; }
+  else if (e === -1) { toast('🐦 Birdie ! Bien joué ' + nom + ' !', true); S.notified[t] = true; }
+  else if (e >= 2) { toast('😅 Double bogey... ça arrive !'); S.notified[t] = true; }
+}
+function prevH() { if (S.hole > 0) { leaveHole(); S.hole--; refreshGameUI(); } }
+function nextH() {
+  if (S.hole < 17) { leaveHole(); S.hole++; refreshGameUI(); }
+  else {
+    leaveHole();
+    var done = S.scores.filter(function (s) { return s !== null; }).length;
+    toast(done === 18 ? '🏆 18 trous joués ! Bravo !' : 'Dernier trou · ' + done + '/18', done === 18);
+  }
+}
+
+/* ── Scores + classement ────────────────────────────────────────────────── */
+function refreshScores() {
+  var box = document.getElementById('sc-cards');
+  if (!S.game) { box.innerHTML = '<div style="text-align:center;padding:40px;color:var(--muted);">Aucune partie en cours</div>'; return; }
+  txt('sc-info', (S.game.name || S.game.courseName).toUpperCase() + ' · ' + MODES[S.game.mode].label.toUpperCase());
+  box.innerHTML = '';
+  var pars = S.game.coursePars, allScores = S.game.scores || {};
+  var ents = [];
+  if (MODES[S.game.mode].teams) {
+    (S.game.teams || []).forEach(function (t, i) {
+      var p0 = t.players[0], pid0 = p0 ? p0.pid : null;
+      var scores = pid0 === S.player.pid ? S.scores : ((pid0 && allScores[pid0]) || Array(18).fill(null));
+      ents.push({ label: (p0 ? p0.prenom : '?') + ' & ' + (t.players[1] ? t.players[1].prenom : '?'), sub: 'Équipe ' + (i + 1), p: p0, scores: scores, me: pid0 === S.player.pid });
+    });
+  } else {
+    (S.game.players || []).forEach(function (j) {
+      var me = j.pid === S.player.pid;
+      var scores = me ? S.scores : (allScores[j.pid] || Array(18).fill(null));
+      ents.push({ label: j.prenom + (j.nom ? ' ' + j.nom[0] + '.' : ''), sub: 'Index ' + j.index, p: j, scores: scores, me: me });
+    });
+  }
+  ents.forEach(function (en) {
+    var pl = en.scores.filter(function (s) { return s !== null; });
+    en.n = pl.length; en.total = pl.reduce(function (a, b) { return a + b; }, 0);
+    var pa = pars.slice(0, en.n).reduce(function (a, b) { return a + b; }, 0);
+    en.ecart = en.n > 0 ? en.total - pa : 9999;
+  });
+  ents.sort(function (a, b) { if (a.n === 0 && b.n === 0) return 0; if (a.n === 0) return 1; if (b.n === 0) return -1; return a.ecart - b.ecart; });
+  ents.forEach(function (en, rank) { box.appendChild(scoreCard(en, rank, pars)); });
+}
+function scoreCard(en, rank, pars) {
+  var medals = ['🥇', '🥈', '🥉'];
+  var pos = en.n > 0 ? (rank < 3 ? medals[rank] : '#' + (rank + 1)) : '–';
+  function std(s, par) {
+    if (s === null) return '<td style="color:#ccc;font-size:12px;">·</td>';
+    var e = s - par, c = 'var(--text)', fw = '700';
+    if (e <= -2) c = 'var(--gold)'; else if (e === -1) { c = 'var(--green)'; fw = '900'; }
+    else if (e === 1) c = 'var(--orange)'; else if (e >= 2) { c = 'var(--red)'; fw = '900'; }
+    return '<td style="color:' + c + ';font-weight:' + fw + ';">' + s + '</td>';
+  }
+  var al = en.scores.slice(0, 9), ret = en.scores.slice(9, 18);
+  var pAl = pars.slice(0, 9).reduce(function (a, b) { return a + b; }, 0), pRet = pars.slice(9, 18).reduce(function (a, b) { return a + b; }, 0);
+  var tAl = al.filter(function (s) { return s !== null; }).reduce(function (a, b) { return a + b; }, 0);
+  var tRet = ret.filter(function (s) { return s !== null; }).reduce(function (a, b) { return a + b; }, 0);
+  var ecTxt = en.n > 0 ? ((en.ecart >= 0 ? '+' : '') + en.ecart) : '';
+  var ecCol = en.ecart <= 0 ? 'var(--green)' : 'var(--red)';
+  var card = document.createElement('div'); card.className = 'card';
+  card.style.border = en.me ? '2px solid var(--green)' : 'none';
+  card.innerHTML =
+    '<div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:14px;">' +
+      '<div style="display:flex;align-items:center;gap:10px;">' +
+        '<div style="font-family:\'Barlow Condensed\',sans-serif;font-weight:900;font-size:18px;min-width:28px;text-align:center;">' + pos + '</div>' +
+        avatarHTML(en.p, 34, en.me ? 'var(--green)' : 'var(--bg)', en.me ? '#fff' : 'var(--text)') +
+        '<div><div style="font-family:\'Barlow Condensed\',sans-serif;font-weight:800;font-size:16px;text-transform:uppercase;">' + en.label + '</div>' +
+        '<div style="font-size:11px;color:var(--muted);">' + en.sub + '</div></div>' +
+      '</div>' +
+      '<div style="text-align:right;">' +
+        '<div style="font-family:\'Barlow Condensed\',sans-serif;font-weight:900;font-size:30px;">' + (en.n > 0 ? en.total : '—') + '</div>' +
+        (en.n > 0 ? '<div style="font-size:12px;color:' + ecCol + ';font-weight:700;">' + ecTxt + ' / par</div>' : '<div style="font-size:11px;color:var(--muted);">en attente</div>') +
+      '</div>' +
+    '</div>' +
+    '<div style="overflow-x:auto;-webkit-overflow-scrolling:touch;"><table class="st" style="min-width:100%;">' +
+      '<tr><th></th>' + [1, 2, 3, 4, 5, 6, 7, 8, 9].map(function (n) { return '<th>' + n + '</th>'; }).join('') + '<th class="tot">Al.</th></tr>' +
+      '<tr><td style="font-size:10px;color:var(--muted);">Par</td>' + pars.slice(0, 9).map(function (p) { return '<td style="font-size:10px;color:var(--muted);">' + p + '</td>'; }).join('') + '<td class="tot" style="font-size:10px;color:var(--muted);">' + pAl + '</td></tr>' +
+      '<tr><td></td>' + al.map(function (s, i) { return std(s, pars[i]); }).join('') + '<td class="tot">' + (tAl || '—') + '</td></tr>' +
+      '<tr><td colspan="11" style="height:6px;"></td></tr>' +
+      '<tr><th></th>' + [10, 11, 12, 13, 14, 15, 16, 17, 18].map(function (n) { return '<th>' + n + '</th>'; }).join('') + '<th class="tot">Ret.</th></tr>' +
+      '<tr><td style="font-size:10px;color:var(--muted);">Par</td>' + pars.slice(9, 18).map(function (p) { return '<td style="font-size:10px;color:var(--muted);">' + p + '</td>'; }).join('') + '<td class="tot" style="font-size:10px;color:var(--muted);">' + pRet + '</td></tr>' +
+      '<tr><td></td>' + ret.map(function (s, i) { return std(s, pars[9 + i]); }).join('') + '<td class="tot">' + (tRet || '—') + '</td></tr>' +
+    '</table></div>';
+  return card;
+}
+
+/* ── Fin / quitter (avec suppression auto) ─────────────────────────────── */
+function endGame() {
+  if (!S.game) return; leaveHole();
+  txt('fin-sub', (S.game.name || S.game.courseName) + ' · ' + MODES[S.game.mode].label);
+  var pars = S.game.coursePars;
+  var total = S.scores.filter(function (s) { return s !== null; }).reduce(function (a, b) { return a + b; }, 0);
+  var n = S.scores.filter(function (s) { return s !== null; }).length;
+  var pa = pars.slice(0, n).reduce(function (a, b) { return a + b; }, 0), ec = total - pa;
+  document.getElementById('fin-body').innerHTML =
+    '<div class="card" style="text-align:center;">' +
+    '<div style="font-family:\'Barlow Condensed\',sans-serif;font-weight:700;font-size:12px;color:var(--muted);text-transform:uppercase;margin-bottom:8px;">' + (S.player ? S.player.prenom : 'Joueur') + '</div>' +
+    '<div style="font-family:\'Barlow Condensed\',sans-serif;font-weight:900;font-size:72px;line-height:1;">' + (total || '—') + '</div>' +
+    '<div style="font-size:16px;color:' + (ec <= 0 ? 'var(--green)' : 'var(--red)') + ';font-weight:700;margin-top:8px;">' + (ec >= 0 ? '+' : '') + ec + ' / par</div>' +
+    '<div style="font-size:12px;color:var(--muted);margin-top:6px;">' + n + '/18 trous complétés</div></div>';
+  go('s-fin');
+}
+/* Quand on confirme la fin : on se retire de la partie. Le dernier supprime le doc. */
+function confirmEnd() {
+  leaveAndMaybeDelete(function () { clearSessionLocal(); go('s-home'); });
+}
+function quitGame() {
+  if (!confirm('Quitter la partie ? Tu seras retiré de la liste des joueurs.')) return;
+  leaveAndMaybeDelete(function () { clearSessionLocal(); go('s-home'); });
+}
+function leaveAndMaybeDelete(done) {
+  if (!FB_OK || !S.gameId) { done(); return; }
+  var id = S.gameId, myPid = S.player.pid;
+  DB.collection('games').doc(id).get().then(function (snap) {
+    if (!snap.exists) { done(); return; }
+    var data = snap.data();
+    var remaining = (data.players || []).filter(function (p) { return p.pid !== myPid; });
+    if (remaining.length === 0) {
+      // dernier joueur → on supprime toute la partie
+      DB.collection('games').doc(id).delete().then(done).catch(function (e) { console.error(e); done(); });
+    } else {
+      var ns = Object.assign({}, data.scores); delete ns[myPid];
+      // Si l'hôte part, transférer à un autre joueur
+      var newHost = data.host;
+      if (data.host === myPid) newHost = remaining[0].pid;
+      // Retirer des équipes éventuelles
+      var teams = (data.teams || []).map(function (t) {
+        return { players: t.players.filter(function (pp) { return pp && pp.pid !== myPid; }) };
+      }).filter(function (t) { return t.players.length > 0; });
+      DB.collection('games').doc(id).update({
+        players: remaining, scores: ns, host: newHost, teams: teams,
+        updatedAt: firebase.firestore.FieldValue.serverTimestamp()
+      }).then(done).catch(function (e) { console.error(e); done(); });
+    }
+  }).catch(function (e) { console.error(e); done(); });
+}
+function backHome() { confirmEnd(); }
+function clearSessionLocal() {
+  if (S.unsub) { S.unsub(); S.unsub = null; }
+  S.game = null; S.gameId = null; S.hole = 0; S.started = false;
+  S.scores = Array(18).fill(null); S.extras = []; S.notified = {};
+  localStorage.removeItem('tb_session');
+  renderPlayerList(); renderHomeParties();
+}
+
+/* ── Carte « ma partie en cours » (accueil) ────────────────────────────── */
+function renderHomeParties() {
+  var c = document.getElementById('home-mine'), e = document.getElementById('mine-empty');
+  if (!c || !e) return;
+  if (!S.gameId) { c.innerHTML = ''; e.style.display = 'block'; return; }
+  e.style.display = 'none';
+  var n = S.scores.filter(function (s) { return s !== null; }).length;
+  var tot = S.scores.filter(function (s) { return s !== null; }).reduce(function (a, b) { return a + b; }, 0);
+  var pct = Math.round(n / 18 * 100);
+  var name = (S.game && (S.game.name || S.game.courseName)) || 'Partie';
+  var mlabel = (S.game && MODES[S.game.mode]) ? MODES[S.game.mode].label : '';
+  var status = (S.game && S.game.status === 'lobby') ? 'salon' : 'jeu';
+  var target = status === 'salon' ? 's-salon' : 's-game';
+  c.innerHTML =
+    '<div class="card" style="cursor:pointer;border:2px solid var(--green);" onclick="resume(\'' + target + '\')">' +
+    '<div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:10px;">' +
+      '<div><div style="font-family:\'Barlow Condensed\',sans-serif;font-weight:900;font-size:18px;text-transform:uppercase;">' + esc(name) + '</div>' +
+      '<div style="font-size:12px;color:var(--muted);">' + mlabel + (status === 'salon' ? ' · en attente' : '') + '</div></div>' +
+      '<div style="text-align:right;"><div style="font-family:\'Barlow Condensed\',sans-serif;font-weight:900;font-size:32px;">' + (tot || '0') + '</div>' +
+      '<div style="font-size:11px;color:var(--muted);">' + n + '/18 trous</div></div></div>' +
+    '<div style="height:5px;background:var(--bg);border-radius:3px;overflow:hidden;">' +
+      '<div style="height:5px;background:var(--green);border-radius:3px;width:' + pct + '%;transition:width .3s;"></div></div>' +
+    '<div style="font-size:11px;color:var(--muted);margin-top:6px;text-align:right;">Appuie pour reprendre →</div></div>';
+}
+function resume(target) {
+  if (target === 's-game') { buildHolePicker(); go('s-game'); }
+  else go('s-salon');
+}
+
+/* ── Utils ──────────────────────────────────────────────────────────────── */
+function val(id) { var e = document.getElementById(id); return e ? e.value : ''; }
+function trim(id) { return val(id).trim(); }
+function setv(id, v) { var e = document.getElementById(id); if (e) e.value = v; }
+function txt(id, v) { var e = document.getElementById(id); if (e) e.textContent = v; }
+function fullname(j) { return j.prenom + (j.nom ? ' ' + j.nom : ''); }
+function esc(s) { return String(s == null ? '' : s).replace(/[&<>"]/g, function (c) { return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]; }); }
+function lget(k) { try { return JSON.parse(localStorage.getItem(k)); } catch (e) { return null; } }
+function lset(k, v) { try { localStorage.setItem(k, JSON.stringify(v)); } catch (e) {} }
+function toast(msg, ok) {
+  var el = document.getElementById('toast'); if (!el) return;
+  el.textContent = msg; el.className = 'show' + (ok ? ' ok' : '');
+  clearTimeout(window._tt); window._tt = setTimeout(function () { el.className = ''; }, 3200);
+}
