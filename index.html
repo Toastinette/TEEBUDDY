@@ -186,12 +186,15 @@
 
   <!-- ════════ SCORES ════════ -->
   <div class="screen" id="s-scores">
-    <div class="banner" style="padding-bottom:20px;">
-      <div style="display:flex;align-items:center;justify-content:space-between;">
-        <img class="logo white" style="width:60px;" alt="">
-        <button class="btn B-ico" onclick="go('s-game')" style="background:rgba(255,255,255,.2);border:none;font-size:20px;">✕</button>
+    <div class="banner" style="padding-bottom:18px;">
+      <div style="display:flex;align-items:center;justify-content:space-between;gap:12px;">
+        <img class="logo white" style="width:48px;height:auto;flex-shrink:0;" alt="">
+        <div style="flex:1;text-align:center;">
+          <div class="D" style="font-size:20px;color:#fff;line-height:1;">Classement</div>
+        </div>
+        <button class="btn B-ico" onclick="go('s-game')" style="background:rgba(255,255,255,.2);border:none;font-size:20px;flex-shrink:0;">✕</button>
       </div>
-      <div style="display:flex;align-items:center;margin-top:12px;"><span id="live-dot"></span><span style="font-family:'Barlow Condensed',sans-serif;font-weight:700;font-size:13px;color:rgba(255,255,255,.9);text-transform:uppercase;letter-spacing:.08em;" id="sc-info">—</span></div>
+      <div style="display:flex;align-items:center;justify-content:center;margin-top:12px;"><span id="live-dot"></span><span style="font-family:'Barlow Condensed',sans-serif;font-weight:700;font-size:12px;color:rgba(255,255,255,.9);text-transform:uppercase;letter-spacing:.08em;" id="sc-info">—</span></div>
     </div>
     <div style="padding:20px;display:flex;flex-direction:column;gap:14px;" id="sc-cards"></div>
     <div style="height:24px;"></div>

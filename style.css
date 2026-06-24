@@ -98,6 +98,27 @@ body {
 /* Champ texte normal (nom de partie) : pas en majuscules */
 .inp.normal { text-transform: none; letter-spacing: normal; font-weight: 600; }
 
+/* ── Menu déroulant (sélection parcours) ───────────────────────────────── */
+.select-wrap { position: relative; }
+.select-wrap::after {
+  content: ''; position: absolute; right: 22px; top: 50%;
+  width: 9px; height: 9px; margin-top: -6px;
+  border-right: 2.5px solid var(--text); border-bottom: 2.5px solid var(--text);
+  transform: rotate(45deg); pointer-events: none;
+}
+.select {
+  width: 100%;
+  border: 2.5px solid var(--border); border-radius: var(--r);
+  padding: 15px 44px 15px 20px;
+  font-family: 'Barlow Condensed', sans-serif; font-size: 16px; font-weight: 700;
+  text-transform: uppercase; letter-spacing: .03em;
+  background: #fff; color: var(--text);
+  outline: none; cursor: pointer;
+  -webkit-appearance: none; appearance: none;
+  transition: border-color .2s;
+}
+.select:focus { border-color: var(--green); }
+
 /* ── Sélecteur de trous ────────────────────────────────────────────────── */
 .holes-row { display: flex; gap: 6px; overflow-x: auto; padding: 0 16px; scrollbar-width: none; -webkit-overflow-scrolling: touch; }
 .holes-row::-webkit-scrollbar { display: none; }
@@ -156,7 +177,7 @@ body {
 }
 
 /* ── Logo (commun) ─────────────────────────────────────────────────────── */
-.logo { display: block; }
+.logo { display: block; max-width: 100%; height: auto; }
 .logo.white { filter: brightness(0) invert(1); }
 
 /* ── Bandeau vert (salon, scores, fin) ─────────────────────────────────── */

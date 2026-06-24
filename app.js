@@ -53,11 +53,27 @@ function boot() {
   buildCourseList();
   renderPlayerList();
   renderHomeParties();
-  if (FB_OK) attachOpenGamesListener();
+  if (FB_OK) { attachOpenGamesListener(); loadCoursesFromDB(); }
 }
 function applyLogos() {
   var l = document.querySelectorAll('img.logo');
   for (var i = 0; i < l.length; i++) l[i].src = 'logo.png';
+}
+
+/* Charge les parcours depuis Firestore (gérés via la page admin).
+   Fusionne avec ceux de config.js : Firestore prioritaire. */
+function loadCoursesFromDB() {
+  DB.collection('courses').get().then(function (snap) {
+    var dbCourses = [];
+    snap.forEach(function (doc) { var d = doc.data(); d.id = doc.id; dbCourses.push(d); });
+    if (dbCourses.length > 0) {
+      var ids = dbCourses.map(function (c) { return c.id; });
+      var fromConfig = (window.COURSES || []).filter(function (c) { return ids.indexOf(c.id) < 0; });
+      COURSES = dbCourses.concat(fromConfig);
+      COURSES.sort(function (a, b) { return (a.nom || '').localeCompare(b.nom || ''); });
+      buildCourseList();
+    }
+  }).catch(function (e) { console.error('courses', e); });
 }
 if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', boot);
 else boot();
@@ -180,24 +196,19 @@ function updatePlayerUI() {
 
 /* ── Création de partie ─────────────────────────────────────────────────── */
 function buildCourseList() {
-  var el = document.getElementById('list-parcours'); if (!el) return; el.innerHTML = '';
-  COURSES.forEach(function (c) {
-    var b = document.createElement('button');
-    b.className = 'btn ' + (c.id === selCourse ? 'B-pill' : 'B-pill-out');
-    b.setAttribute('data-c', c.id); b.id = 'c-' + c.id;
-    b.style.cssText = 'justify-content:flex-start;gap:10px;width:100%;';
-    b.textContent = '⛳ ' + c.nom + ' · ' + c.trous + ' trous · Par ' + c.parTotal;
-    b.onclick = function () { selCourse = c.id; hlCourse(); };
-    el.appendChild(b);
-  });
+  var el = document.getElementById('list-parcours'); if (!el) return;
+  if (!COURSES || COURSES.length === 0) {
+    el.innerHTML = '<div class="hint">Aucun parcours disponible. Ajoute-en un via la page admin.</div>';
+    return;
+  }
+  if (!selCourse || !COURSES.find(function (c) { return c.id === selCourse; })) selCourse = COURSES[0].id;
+  var opts = COURSES.map(function (c) {
+    return '<option value="' + esc(c.id) + '"' + (c.id === selCourse ? ' selected' : '') + '>' +
+           esc(c.nom) + ' · ' + c.trous + ' trous · Par ' + c.parTotal + '</option>';
+  }).join('');
+  el.innerHTML = '<div class="select-wrap"><select class="select" id="course-select" onchange="onCourseChange(this.value)">' + opts + '</select></div>';
 }
-function hlCourse() {
-  document.querySelectorAll('[data-c]').forEach(function (b) {
-    b.className = 'btn B-pill-out'; b.style.cssText = 'justify-content:flex-start;gap:10px;width:100%;';
-  });
-  var s = document.getElementById('c-' + selCourse);
-  if (s) { s.className = 'btn B-pill'; s.style.cssText = 'justify-content:flex-start;gap:10px;width:100%;'; }
-}
+function onCourseChange(id) { selCourse = id; }
 function showAddPlayer() { document.getElementById('form-add').style.display = 'block'; document.getElementById('add-prenom').focus(); }
 function hideAddPlayer() { document.getElementById('form-add').style.display = 'none'; }
 function addPlayer() {
@@ -401,12 +412,12 @@ function renderSalon() {
   var jl = document.getElementById('sl-joueurs'); jl.innerHTML = '';
   (g.players || []).forEach(function (j) {
     var me = j.pid === S.player.pid;
-    var crown = j.pid === g.host ? ' <span style="font-size:10px;opacity:.8;">👑</span>' : '';
+    var crown = j.pid === g.host ? ' <span style="font-size:10px;">👑</span>' : '';
     var d = document.createElement('div');
-    d.style.cssText = 'display:flex;align-items:center;gap:10px;padding:12px 14px;background:rgba(255,255,255,.15);border-radius:12px;';
-    d.innerHTML = avatarHTML(j, 34, 'rgba(255,255,255,.3)') +
-      '<div style="font-family:\'Barlow Condensed\',sans-serif;font-weight:700;font-size:15px;text-transform:uppercase;color:#fff;">' + j.prenom + crown + (me ? ' <span style="font-size:11px;opacity:.7;">(moi)</span>' : '') + '</div>' +
-      '<div style="margin-left:auto;font-size:12px;color:rgba(255,255,255,.7);">Index ' + j.index + '</div>';
+    d.style.cssText = 'display:flex;align-items:center;gap:10px;padding:12px 14px;background:#fff;border-radius:14px;box-shadow:0 1px 6px rgba(0,0,0,.05);' + (me ? 'border:2px solid var(--green);' : '');
+    d.innerHTML = avatarHTML(j, 34, 'var(--green)') +
+      '<div style="font-family:\'Barlow Condensed\',sans-serif;font-weight:700;font-size:15px;text-transform:uppercase;color:var(--text);">' + j.prenom + crown + (me ? ' <span style="font-size:11px;color:var(--green);">(moi)</span>' : '') + '</div>' +
+      '<div style="margin-left:auto;font-size:12px;color:var(--muted);">Index ' + j.index + '</div>';
     jl.appendChild(d);
   });
   txt('sl-count', (g.players || []).length);

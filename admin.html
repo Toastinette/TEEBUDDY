@@ -56,8 +56,31 @@
     <div id="purge-result" class="muted" style="margin-top:10px;"></div>
   </div>
 
-  <h2>Parcours configurés</h2>
-  <div class="muted" style="margin-bottom:12px;">Pour l'instant, les parcours sont définis dans <code>config.js</code>. La gestion via cette page (ajout en base) viendra ensuite.</div>
+  <h2>Parcours</h2>
+  <div class="muted" style="margin-bottom:12px;">Les parcours créés ici sont enregistrés dans Firestore et apparaissent automatiquement dans le menu déroulant de l'application. (Bassin Bleu reste défini dans <code>config.js</code> comme parcours par défaut.)</div>
+
+  <!-- Formulaire création / édition -->
+  <div class="card">
+    <div class="row" style="margin-bottom:12px;">
+      <strong style="font-size:16px;" id="form-title">Ajouter un parcours</strong>
+      <button class="btn" id="form-cancel" onclick="resetCourseForm()" style="background:var(--bg);color:var(--muted);display:none;">Annuler l'édition</button>
+    </div>
+    <div style="margin-bottom:12px;">
+      <label class="muted" style="display:block;margin-bottom:4px;">Nom du parcours</label>
+      <input class="inp" id="cf-nom" placeholder="Ex : Golf du Bassin Bleu" maxlength="40">
+    </div>
+    <div style="margin-bottom:12px;">
+      <label class="muted" style="display:block;margin-bottom:6px;">Par de chaque trou (1 à 18)</label>
+      <div id="cf-pars" style="display:grid;grid-template-columns:repeat(9,1fr);gap:6px;"></div>
+    </div>
+    <div class="row">
+      <div class="muted">Par total : <strong id="cf-total" style="color:var(--text);">—</strong></div>
+      <button class="btn btn-green" onclick="saveCourse()">💾 Enregistrer le parcours</button>
+    </div>
+    <input type="hidden" id="cf-editing" value="">
+  </div>
+
+  <h2 style="font-size:15px;">Parcours enregistrés</h2>
   <div id="courses"></div>
 
 <script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-app-compat.js"></script>
@@ -128,16 +151,98 @@
 
   function loadCourses(){
     var box=document.getElementById('courses');
+    box.innerHTML='<div class="empty">Chargement...</div>';
+    // 1) Parcours par défaut (config.js)
+    var defaults=(window.COURSES||[]).map(function(c){ c._source='config'; return c; });
+    // 2) Parcours Firestore
+    if(!OK){ renderCourseList(defaults); return; }
+    DB.collection('courses').get().then(function(snap){
+      var dbc=[];
+      snap.forEach(function(doc){ var d=doc.data(); d.id=doc.id; d._source='firestore'; dbc.push(d); });
+      var ids=dbc.map(function(c){return c.id;});
+      var merged=dbc.concat(defaults.filter(function(c){ return ids.indexOf(c.id)<0; }));
+      merged.sort(function(a,b){ return (a.nom||'').localeCompare(b.nom||''); });
+      renderCourseList(merged);
+    }).catch(function(e){ renderCourseList(defaults); });
+  }
+  function renderCourseList(list){
+    var box=document.getElementById('courses');
+    if(!list.length){ box.innerHTML='<div class="empty">Aucun parcours</div>'; return; }
     var html='';
-    (window.COURSES||[]).forEach(function(c){
-      html+='<div class="card"><strong>'+esc(c.nom)+'</strong> <span class="muted">('+c.trous+' trous · Par '+c.parTotal+')</span>'+
+    list.forEach(function(c){
+      var editable=c._source==='firestore';
+      html+='<div class="card"><div class="row"><div><strong>'+esc(c.nom)+'</strong> <span class="muted">('+c.trous+' trous · Par '+c.parTotal+')</span>'+
+        (editable?'':' <span class="badge lobby">défaut</span>')+'</div><div>'+
+        (editable?'<button class="btn btn-dark" onclick="editCourse(\''+c.id+'\')">✎ Modifier</button> <button class="btn btn-red" onclick="delCourse(\''+c.id+'\')">🗑</button>':'')+
+        '</div></div>'+
         '<table><tr><th>Trou</th>'+c.pars.map(function(_,i){return '<th>'+(i+1)+'</th>';}).join('')+'</tr>'+
         '<tr><td>Par</td>'+c.pars.map(function(p){return '<td>'+p+'</td>';}).join('')+'</tr></table></div>';
     });
-    box.innerHTML=html||'<div class="empty">Aucun parcours</div>';
+    box.innerHTML=html;
+  }
+
+  /* ── Formulaire parcours ── */
+  function buildParInputs(){
+    var wrap=document.getElementById('cf-pars'); wrap.innerHTML='';
+    for(var i=0;i<18;i++){
+      var d=document.createElement('div');
+      d.innerHTML='<div style="font-size:10px;color:var(--muted);text-align:center;margin-bottom:2px;">'+(i+1)+'</div>'+
+        '<input class="inp" id="par-'+i+'" type="number" min="3" max="6" value="4" style="padding:8px 4px;text-align:center;" oninput="updateTotal()">';
+      wrap.appendChild(d);
+    }
+    updateTotal();
+  }
+  function updateTotal(){
+    var t=0;
+    for(var i=0;i<18;i++){ t+=parseInt(document.getElementById('par-'+i).value)||0; }
+    document.getElementById('cf-total').textContent=t;
+  }
+  function slugify(s){
+    return s.toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g,'').replace(/[^a-z0-9]+/g,'-').replace(/^-+|-+$/g,'').slice(0,40)||('parcours-'+Date.now());
+  }
+  function saveCourse(){
+    if(!OK){ alert('Firebase indisponible'); return; }
+    var nom=document.getElementById('cf-nom').value.trim();
+    if(!nom){ alert('Entre un nom de parcours'); return; }
+    var pars=[];
+    for(var i=0;i<18;i++){ var v=parseInt(document.getElementById('par-'+i).value)||0; if(v<3||v>6){ alert('Le par du trou '+(i+1)+' doit être entre 3 et 6'); return; } pars.push(v); }
+    var total=pars.reduce(function(a,b){return a+b;},0);
+    var editing=document.getElementById('cf-editing').value;
+    var id=editing||slugify(nom);
+    DB.collection('courses').doc(id).set({
+      nom:nom, trous:18, pars:pars, parTotal:total
+    }).then(function(){
+      alert('Parcours « '+nom+' » enregistré ✓');
+      resetCourseForm(); loadCourses();
+    }).catch(function(e){ alert('Erreur : '+e.message); });
+  }
+  function editCourse(id){
+    DB.collection('courses').doc(id).get().then(function(snap){
+      if(!snap.exists) return;
+      var c=snap.data();
+      document.getElementById('cf-nom').value=c.nom;
+      for(var i=0;i<18;i++){ document.getElementById('par-'+i).value=c.pars[i]||4; }
+      updateTotal();
+      document.getElementById('cf-editing').value=id;
+      document.getElementById('form-title').textContent='Modifier : '+c.nom;
+      document.getElementById('form-cancel').style.display='inline-block';
+      window.scrollTo({top:0,behavior:'smooth'});
+    });
+  }
+  function resetCourseForm(){
+    document.getElementById('cf-nom').value='';
+    document.getElementById('cf-editing').value='';
+    document.getElementById('form-title').textContent='Ajouter un parcours';
+    document.getElementById('form-cancel').style.display='none';
+    buildParInputs();
+  }
+  function delCourse(id){
+    if(!confirm('Supprimer ce parcours ?')) return;
+    DB.collection('courses').doc(id).delete().then(function(){ loadCourses(); });
   }
 
   loadGames();
+  buildParInputs();
   loadCourses();
 </script>
 </body>
