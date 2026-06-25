@@ -29,13 +29,16 @@ var S = {
   unsub:  null,       // listener partie en cours
   unsubList: null,    // listener liste des parties ouvertes
   notified: {},
-  started: false
+  started: false,
+  spectating: false,  // true si on regarde une partie sans y jouer
+  hbTimer: null       // battement de cœur spectateur
 };
 var selCourse = (COURSES[0] && COURSES[0].id) || null;
 
 /* ── Boot ───────────────────────────────────────────────────────────────── */
 function boot() {
   applyLogos();
+  addFooters();
   if (!FB_OK) { showScreen('s-home'); toast('⚠️ Connexion Firebase indisponible'); }
 
   var p = lget('tb_player');
@@ -54,10 +57,33 @@ function boot() {
   renderPlayerList();
   renderHomeParties();
   if (FB_OK) { attachOpenGamesListener(); loadCoursesFromDB(); }
+  // Rafraîchit l'affichage des compteurs de spectateurs (retire les inactifs)
+  setInterval(function () { if (S.game) updateViewerDisplays(); }, 15000);
 }
 function applyLogos() {
   var l = document.querySelectorAll('img.logo');
   for (var i = 0; i < l.length; i++) l[i].src = 'logo.png';
+}
+
+/* Ajoute le footer « Powered by Hook & Slice » au bas de chaque écran */
+function addFooters() {
+  var html = '<img src="hs-logo.png" class="hs-logo" alt=""><img src="hs-text.png" class="hs-text" alt="Powered by Hook & Slice">';
+  var screens = document.querySelectorAll('.screen');
+  for (var i = 0; i < screens.length; i++) {
+    var f = document.createElement('div');
+    f.className = 'footer';
+    f.innerHTML = html;
+    screens[i].appendChild(f);
+  }
+}
+
+/* Menu contextuel : masque les options de partie quand on n'est dans aucune partie */
+function updateMenu() {
+  var inGame = !!S.gameId;
+  ['menu-scores', 'menu-settings', 'menu-sep', 'menu-end'].forEach(function (id) {
+    var el = document.getElementById(id);
+    if (el) el.style.display = inGame ? '' : 'none';
+  });
 }
 
 /* Charge les parcours depuis Firestore (gérés via la page admin).
@@ -90,6 +116,7 @@ function showScreen(id) {
   if (id === 's-profil') fillProfilForm();
   if (id === 's-salon')  renderSalon();
   if (id === 's-settings') renderSettings();
+  if (id === 's-menu')   updateMenu();
 }
 function go(id) { showScreen(id); }
 function back() {
@@ -316,9 +343,11 @@ function attachOpenGamesListener() {
       var d = doc.data(); d._id = doc.id;
       games.push(d);
     });
+    S._openGames = games;
     renderOpenGames(games);
   }, function (err) { console.error('open games', err); });
 }
+function refreshOpenGames() { if (S._openGames) renderOpenGames(S._openGames); }
 function renderOpenGames(games) {
   var box = document.getElementById('open-games');
   var empty = document.getElementById('open-empty');
@@ -351,20 +380,26 @@ function renderOpenGames(games) {
     var host = (g.players.find(function (p) { return p.pid === g.host; }) || {}).prenom || '';
     var avatars = g.players.slice(0, 4).map(function (p) { return avatarHTML(p, 28, 'var(--bg)', 'var(--text)'); }).join('');
     var more = g.players.length > 4 ? '<span style="font-size:11px;color:var(--muted);margin-left:4px;">+' + (g.players.length - 4) + '</span>' : '';
+    var nViewers = countViewers(g);
+    var viewerBadge = nViewers > 0 ? '<span style="font-size:11px;color:var(--muted);margin-left:8px;">👁 ' + nViewers + '</span>' : '';
 
     var card = document.createElement('div');
     card.className = 'card';
-    card.style.cssText = 'cursor:pointer;';
-    card.onclick = function () { joinGameById(g._id); };
     card.innerHTML =
-      '<div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:10px;">' +
-        '<div><div style="font-family:\'Barlow Condensed\',sans-serif;font-weight:900;font-size:17px;text-transform:uppercase;">' + esc(g.name || g.courseName) + '</div>' +
+      '<div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:10px;gap:10px;">' +
+        '<div style="min-width:0;"><div style="font-family:\'Barlow Condensed\',sans-serif;font-weight:900;font-size:17px;text-transform:uppercase;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">' + esc(g.name || g.courseName) + '</div>' +
         '<div style="font-size:12px;color:var(--muted);">' + esc(g.courseName) + ' · ' + mode + ' · ' + statusTxt + '</div></div>' +
-        '<div style="background:var(--green);color:#fff;font-family:\'Barlow Condensed\',sans-serif;font-weight:800;font-size:12px;padding:6px 12px;border-radius:20px;flex-shrink:0;">Rejoindre</div>' +
+        '<div style="display:flex;align-items:center;gap:8px;flex-shrink:0;">' +
+          '<button class="eye-btn" title="Regarder"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="var(--text)" stroke-width="2"><path d="M1 12s4-7 11-7 11 7 11 7-4 7-11 7-11-7-11-7z"/><circle cx="12" cy="12" r="3"/></svg></button>' +
+          '<div class="join-pill" style="background:var(--green);color:#fff;font-family:\'Barlow Condensed\',sans-serif;font-weight:800;font-size:12px;padding:8px 14px;border-radius:20px;cursor:pointer;">Rejoindre</div>' +
+        '</div>' +
       '</div>' +
       '<div style="display:flex;align-items:center;gap:4px;">' + avatars + more +
-        '<span style="font-size:12px;color:var(--muted);margin-left:8px;">' + g.players.length + ' joueur' + (g.players.length > 1 ? 's' : '') + (host ? ' · hôte ' + esc(host) : '') + '</span>' +
+        '<span style="font-size:12px;color:var(--muted);margin-left:8px;">' + g.players.length + ' joueur' + (g.players.length > 1 ? 's' : '') + (host ? ' · hôte ' + esc(host) : '') + '</span>' + viewerBadge +
       '</div>';
+    // Clics
+    card.querySelector('.join-pill').onclick = function (ev) { ev.stopPropagation(); joinGameById(g._id); };
+    card.querySelector('.eye-btn').onclick = function (ev) { ev.stopPropagation(); spectateGame(g._id); };
     box.appendChild(card);
   });
 }
@@ -374,9 +409,10 @@ function attachGameListener(id) {
   if (S.unsub) S.unsub();
   S.unsub = DB.collection('games').doc(id).onSnapshot(function (snap) {
     if (!snap.exists) {
-      // La partie a été supprimée (tous les joueurs sont partis)
       if (S.gameId === id) {
-        toast('La partie a été clôturée');
+        toast(S.spectating ? 'La partie est terminée' : 'La partie a été clôturée');
+        stopHeartbeat();
+        S.spectating = false;
         clearSessionLocal();
         go('s-home');
       }
@@ -384,12 +420,13 @@ function attachGameListener(id) {
     }
     S.game = snap.data();
     pulseLive();
-    if (S.game.status === 'playing' && !S.started) {
+    if (!S.spectating && S.game.status === 'playing' && !S.started) {
       S.started = true; buildHolePicker(); go('s-game');
       toast('La partie commence ! ⛳', true);
       return;
     }
-    renderHomeParties();
+    if (!S.spectating) renderHomeParties();
+    updateViewerDisplays();
     if (isActive('s-salon'))    renderSalon();
     if (isActive('s-scores'))   refreshScores();
     if (isActive('s-settings')) renderSettings();
@@ -549,6 +586,7 @@ function refreshGameUI() {
   }
   var pv = document.getElementById('g-prev'); if (pv) pv.style.opacity = t === 0 ? '.4' : '1';
   buildHolePicker();
+  updateViewerDisplays();
 }
 function scoreInfo(e) {
   if (e <= -3) return { label: 'ALBATROS 🦅', color: 'var(--gold)' };
@@ -592,22 +630,18 @@ function nextH() {
 }
 
 /* ── Scores + classement ────────────────────────────────────────────────── */
-function refreshScores() {
-  var box = document.getElementById('sc-cards');
-  if (!S.game) { box.innerHTML = '<div style="text-align:center;padding:40px;color:var(--muted);">Aucune partie en cours</div>'; return; }
-  txt('sc-info', (S.game.name || S.game.courseName).toUpperCase() + ' · ' + MODES[S.game.mode].label.toUpperCase());
-  box.innerHTML = '';
+function buildScoreEntities() {
   var pars = S.game.coursePars, allScores = S.game.scores || {};
   var ents = [];
   if (MODES[S.game.mode].teams) {
     (S.game.teams || []).forEach(function (t, i) {
       var p0 = t.players[0], pid0 = p0 ? p0.pid : null;
-      var scores = pid0 === S.player.pid ? S.scores : ((pid0 && allScores[pid0]) || Array(18).fill(null));
-      ents.push({ label: (p0 ? p0.prenom : '?') + ' & ' + (t.players[1] ? t.players[1].prenom : '?'), sub: 'Équipe ' + (i + 1), p: p0, scores: scores, me: pid0 === S.player.pid });
+      var scores = (pid0 === S.player.pid && !S.spectating) ? S.scores : ((pid0 && allScores[pid0]) || Array(18).fill(null));
+      ents.push({ label: (p0 ? p0.prenom : '?') + ' & ' + (t.players[1] ? t.players[1].prenom : '?'), sub: 'Équipe ' + (i + 1), p: p0, scores: scores, me: !S.spectating && pid0 === S.player.pid });
     });
   } else {
     (S.game.players || []).forEach(function (j) {
-      var me = j.pid === S.player.pid;
+      var me = !S.spectating && j.pid === S.player.pid;
       var scores = me ? S.scores : (allScores[j.pid] || Array(18).fill(null));
       ents.push({ label: j.prenom + (j.nom ? ' ' + j.nom[0] + '.' : ''), sub: 'Index ' + j.index, p: j, scores: scores, me: me });
     });
@@ -619,7 +653,17 @@ function refreshScores() {
     en.ecart = en.n > 0 ? en.total - pa : 9999;
   });
   ents.sort(function (a, b) { if (a.n === 0 && b.n === 0) return 0; if (a.n === 0) return 1; if (b.n === 0) return -1; return a.ecart - b.ecart; });
-  ents.forEach(function (en, rank) { box.appendChild(scoreCard(en, rank, pars)); });
+  return ents;
+}
+function refreshScores() {
+  var box = document.getElementById('sc-cards');
+  if (!S.game) { box.innerHTML = '<div style="text-align:center;padding:40px;color:var(--muted);">Aucune partie en cours</div>'; return; }
+  txt('sc-info', (S.game.name || S.game.courseName).toUpperCase() + ' · ' + MODES[S.game.mode].label.toUpperCase());
+  document.getElementById('sc-spectator').style.display = S.spectating ? 'block' : 'none';
+  box.innerHTML = '';
+  var pars = S.game.coursePars;
+  buildScoreEntities().forEach(function (en, rank) { box.appendChild(scoreCard(en, rank, pars)); });
+  updateViewerDisplays();
 }
 function scoreCard(en, rank, pars) {
   var medals = ['🥇', '🥈', '🥉'];
@@ -717,7 +761,8 @@ function leaveAndMaybeDelete(done) {
 function backHome() { confirmEnd(); }
 function clearSessionLocal() {
   if (S.unsub) { S.unsub(); S.unsub = null; }
-  S.game = null; S.gameId = null; S.hole = 0; S.started = false;
+  stopHeartbeat();
+  S.game = null; S.gameId = null; S.hole = 0; S.started = false; S.spectating = false;
   S.scores = Array(18).fill(null); S.extras = []; S.notified = {};
   localStorage.removeItem('tb_session');
   renderPlayerList(); renderHomeParties();
@@ -727,7 +772,7 @@ function clearSessionLocal() {
 function renderHomeParties() {
   var c = document.getElementById('home-mine'), e = document.getElementById('mine-empty');
   if (!c || !e) return;
-  if (!S.gameId) { c.innerHTML = ''; e.style.display = 'block'; return; }
+  if (!S.gameId || S.spectating) { c.innerHTML = ''; e.style.display = 'block'; return; }
   e.style.display = 'none';
   var n = S.scores.filter(function (s) { return s !== null; }).length;
   var tot = S.scores.filter(function (s) { return s !== null; }).reduce(function (a, b) { return a + b; }, 0);
@@ -750,6 +795,100 @@ function renderHomeParties() {
 function resume(target) {
   if (target === 's-game') { buildHolePicker(); go('s-game'); }
   else go('s-salon');
+}
+
+/* ── Mode spectateur ───────────────────────────────────────────────────── */
+function spectateGame(id) {
+  if (!S.player) { toast('Crée ton profil d\'abord 👆'); go('s-profil'); return; }
+  if (!FB_OK) { toast('⚠️ Firebase indisponible'); return; }
+  if (S.gameId && !S.spectating) { toast('Termine ta partie avant de regarder une autre'); return; }
+  S.gameId = id; S.spectating = true; S.started = true;
+  S.scores = Array(18).fill(null);
+  attachGameListener(id);
+  registerViewer();
+  startHeartbeat();
+  go('s-scores');
+  toast('Mode spectateur 👁', true);
+}
+function registerViewer() {
+  if (!FB_OK || !S.gameId || !S.player || !S.spectating) return;
+  var upd = {}; upd['viewers.' + S.player.pid] = Date.now();
+  DB.collection('games').doc(S.gameId).update(upd).catch(function () {});
+}
+function startHeartbeat() { stopHeartbeat(); S.hbTimer = setInterval(registerViewer, 15000); }
+function stopHeartbeat() { if (S.hbTimer) { clearInterval(S.hbTimer); S.hbTimer = null; } }
+function removeViewer(done) {
+  done = done || function () {};
+  if (!FB_OK || !S.gameId || !S.player) { done(); return; }
+  var upd = {}; upd['viewers.' + S.player.pid] = firebase.firestore.FieldValue.delete();
+  DB.collection('games').doc(S.gameId).update(upd).then(done).catch(done);
+}
+function countViewers(game) {
+  if (!game || !game.viewers) return 0;
+  var now = Date.now(), n = 0;
+  Object.keys(game.viewers).forEach(function (k) { if (now - game.viewers[k] < 30000) n++; });
+  return n;
+}
+function updateViewerDisplays() {
+  var n = countViewers(S.game);
+  function setBadge(wrapId, numId) {
+    var w = document.getElementById(wrapId), num = document.getElementById(numId);
+    if (!w || !num) return;
+    if (n > 0) { w.style.display = 'inline-flex'; num.textContent = n; }
+    else w.style.display = 'none';
+  }
+  setBadge('sc-viewers', 'sc-viewers-n');
+  setBadge('g-viewers', 'g-viewers-n');
+}
+function leaveSpectate() {
+  stopHeartbeat();
+  removeViewer(function () {
+    if (S.unsub) { S.unsub(); S.unsub = null; }
+    S.game = null; S.gameId = null; S.spectating = false; S.started = false;
+    renderHomeParties(); refreshOpenGames(); go('s-home');
+  });
+}
+function closeScores() {
+  if (S.spectating) leaveSpectate();
+  else go('s-game');
+}
+
+/* ── Export JPEG des cartes ────────────────────────────────────────────── */
+function exportScores() {
+  if (!S.game) { toast('Aucune partie'); return; }
+  if (typeof html2canvas === 'undefined') { toast('Module export indisponible (connexion ?)'); return; }
+  toast('Génération de l\'image...');
+  var pars = S.game.coursePars;
+  var ents = buildScoreEntities();
+
+  var box = document.createElement('div');
+  box.style.cssText = 'position:fixed;left:-9999px;top:0;width:440px;background:#F0F0EE;padding:26px 22px;font-family:Barlow,sans-serif;';
+  box.innerHTML =
+    '<div style="text-align:center;margin-bottom:18px;">' +
+    '<div style="font-family:\'Barlow Condensed\',sans-serif;font-weight:900;font-size:28px;text-transform:uppercase;line-height:1;">' + esc(S.game.name || S.game.courseName) + '</div>' +
+    '<div style="font-size:13px;color:#888;margin-top:4px;">' + esc(S.game.courseName) + ' · ' + MODES[S.game.mode].label + ' · ' + new Date().toLocaleDateString('fr-FR') + '</div></div>';
+  var stack = document.createElement('div');
+  stack.style.cssText = 'display:flex;flex-direction:column;gap:12px;';
+  ents.forEach(function (en, rank) { stack.appendChild(scoreCard(en, rank, pars)); });
+  box.appendChild(stack);
+  var foot = document.createElement('div');
+  foot.style.cssText = 'display:flex;align-items:center;justify-content:center;gap:8px;margin-top:18px;opacity:.5;';
+  foot.innerHTML = '<img src="hs-logo.png" style="height:20px;"><img src="hs-text.png" style="height:11px;">';
+  box.appendChild(foot);
+  document.body.appendChild(box);
+
+  html2canvas(box, { backgroundColor: '#F0F0EE', scale: 2, useCORS: true, logging: false }).then(function (canvas) {
+    var url = canvas.toDataURL('image/jpeg', 0.92);
+    var a = document.createElement('a');
+    a.href = url;
+    a.download = 'teebuddy-' + String(S.game.name || 'partie').replace(/[^a-z0-9]/gi, '-').toLowerCase() + '.jpg';
+    document.body.appendChild(a); a.click(); document.body.removeChild(a);
+    if (box.parentNode) box.parentNode.removeChild(box);
+    toast('Carte exportée ✓', true);
+  }).catch(function (e) {
+    console.error(e); if (box.parentNode) box.parentNode.removeChild(box);
+    toast('Erreur lors de l\'export');
+  });
 }
 
 /* ── Utils ──────────────────────────────────────────────────────────────── */

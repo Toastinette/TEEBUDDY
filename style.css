@@ -164,7 +164,7 @@ body {
   display: flex; align-items: flex-start; justify-content: center;
   min-height: 120px;
 }
-.home-head .logo { width: 250px; height: auto; }
+.home-head .logo { width: 130px; height: auto; }
 .home-head .head-actions {
   position: absolute; top: 56px; right: 24px;
   display: flex; flex-direction: column; gap: 10px;
@@ -186,3 +186,38 @@ body {
 /* ── Petites aides ─────────────────────────────────────────────────────── */
 .hint { padding: 14px 16px; background: rgba(46,204,113,.08); border-radius: 14px; font-size: 13px; color: var(--muted); line-height: 1.5; }
 .spacer-44 { width: 44px; }
+
+/* ── Footer Powered by Hook & Slice (sur tous les écrans) ──────────────── */
+.footer {
+  margin-top: auto;
+  display: flex; align-items: center; justify-content: center; gap: 9px;
+  padding: 22px 24px 26px;
+  opacity: .4;
+}
+.footer .hs-logo { height: 22px; width: auto; display: block; }
+.footer .hs-text { height: 12px; width: auto; display: block; }
+/* Footer sur fond vert (bandeaux) : passer en blanc */
+.footer.on-green { opacity: .85; }
+.footer.on-green img { filter: brightness(0) invert(1); }
+
+/* ── Badge spectateur ──────────────────────────────────────────────────── */
+.spectator-badge {
+  display: inline-flex; align-items: center; gap: 5px;
+  background: rgba(0,0,0,.18); color: #fff;
+  font-family: 'Barlow Condensed', sans-serif; font-weight: 700; font-size: 12px;
+  text-transform: uppercase; letter-spacing: .05em;
+  padding: 4px 12px; border-radius: 20px;
+}
+.viewer-count {
+  display: inline-flex; align-items: center; gap: 4px;
+  font-family: 'Barlow Condensed', sans-serif; font-weight: 700; font-size: 12px;
+  color: rgba(255,255,255,.9);
+}
+
+/* ── Bouton œil (spectateur) sur carte de partie ───────────────────────── */
+.eye-btn {
+  width: 40px; height: 40px; border-radius: 50%;
+  background: var(--bg); border: 2px solid var(--border);
+  display: flex; align-items: center; justify-content: center;
+  cursor: pointer; flex-shrink: 0; -webkit-tap-highlight-color: transparent;
+}
