@@ -23,7 +23,6 @@ var S = {
   game:   null,       // document Firestore de la partie
   gameId: null,       // identifiant du document (code court)
   hole:   0,
-  scores: Array(18).fill(null),
   hist:   ['s-home'],
   extras: [],         // joueurs ajoutés manuellement (1 seul téléphone)
   unsub:  null,       // listener partie en cours
@@ -31,7 +30,12 @@ var S = {
   notified: {},
   started: false,
   spectating: false,  // true si on regarde une partie sans y jouer
-  hbTimer: null       // battement de cœur spectateur
+  hbTimer: null,      // battement de cœur spectateur
+  myPids: [],         // pids des joueurs gérés sur CE téléphone (proprio + ajoutés)
+  editable: [],       // unités de score modifiables sur ce téléphone (joueurs ou équipes)
+  activeKey: null,    // clé de l'unité de score actuellement saisie
+  local: {},          // copie locale des scores par clé d'unité { key: [18] }
+  writeTs: {}         // horodatage des dernières écritures (anti-écrasement)
 };
 var selCourse = (COURSES[0] && COURSES[0].id) || null;
 
@@ -49,7 +53,8 @@ function boot() {
   if (sess && sess.id) {
     S.gameId = sess.id;
     S.hole   = sess.hole || 0;
-    S.scores = sess.scores || Array(18).fill(null);
+    S.myPids = sess.myPids || (S.player ? [S.player.pid] : []);
+    S.started = true;
     if (FB_OK) attachGameListener(sess.id);
   }
 
@@ -84,6 +89,91 @@ function updateMenu() {
     var el = document.getElementById(id);
     if (el) el.style.display = inGame ? '' : 'none';
   });
+}
+
+/* ════════════════════════════════════════════════════════════════════════
+   SCORING — unités de score (joueur ou équipe), accès, croix, match play
+   Une "unité" = ce dont on remplit la carte : un joueur (Stroke), ou une
+   équipe (Scramble/MMB, et Match Play en 2v2). Match Play 1v1 = 2 joueurs.
+════════════════════════════════════════════════════════════════════════ */
+
+/* true si le mode se joue par équipes (carte partagée) */
+function teamBased(game) {
+  if (!game) return false;
+  var m = MODES[game.mode] || {};
+  if (m.teams) return true;                       // scramble, mmb
+  if (m.matchplay && (game.teams || []).length >= 2) return true; // match play 2v2
+  return false;
+}
+
+/* Liste des unités de score de la partie (pour le classement et la saisie) */
+function scoringUnits(game) {
+  game = game || S.game;
+  if (!game) return [];
+  if (teamBased(game)) {
+    return (game.teams || []).map(function (t, i) {
+      var p0 = t.players[0], p1 = t.players[1];
+      return {
+        type: 'team', key: t.id || ('team' + i),
+        label: (p0 ? p0.prenom : '?') + ' & ' + (p1 ? p1.prenom : '?'),
+        players: t.players.filter(Boolean), team: t, p: p0
+      };
+    });
+  }
+  return (game.players || []).map(function (p) {
+    return { type: 'player', key: p.pid, label: p.prenom + (p.nom ? ' ' + p.nom[0] + '.' : ''), players: [p], player: p, p: p };
+  });
+}
+
+/* Recalcule les unités modifiables sur ce téléphone + l'unité active + cache local */
+function syncScoringState() {
+  if (!S.game) return;
+  var units = scoringUnits(S.game);
+  S.editable = units.filter(function (u) {
+    return u.players.some(function (p) { return S.myPids.indexOf(p.pid) >= 0; });
+  });
+  if (!S.activeKey || !S.editable.some(function (u) { return u.key === S.activeKey; })) {
+    S.activeKey = S.editable[0] ? S.editable[0].key : null;
+  }
+  // Synchronise le cache local depuis Firestore, sauf écritures très récentes
+  var scores = S.game.scores || {};
+  S.editable.forEach(function (u) {
+    var k = u.key;
+    if (Date.now() - (S.writeTs[k] || 0) < 2500) return;
+    S.local[k] = (scores[k] ? scores[k].slice() : Array(18).fill(null));
+  });
+}
+
+/* Scores d'une unité : cache local prioritaire (pour les unités qu'on édite),
+   sinon valeur Firestore */
+function getScores(key) {
+  if (key && S.local[key]) return S.local[key];
+  if (S.game && S.game.scores && S.game.scores[key]) return S.game.scores[key];
+  return Array(18).fill(null);
+}
+
+/* Un trou est "décidé" s'il a un chiffre ou une croix */
+function isDecided(v) { return typeof v === 'number' || v === 'X'; }
+function sumNums(arr) { return arr.reduce(function (a, b) { return a + (typeof b === 'number' ? b : 0); }, 0); }
+function countPlayed(arr) { return arr.filter(function (s) { return s !== null && s !== undefined; }).length; }
+function parForNumeric(scores, pars) { var s = 0; for (var i = 0; i < scores.length; i++) { if (typeof scores[i] === 'number') s += pars[i]; } return s; }
+
+/* Match Play : différence de trous gagnés (positif = A mène) */
+function matchPlayDiff(aScores, bScores, pars) {
+  var aWins = 0, bWins = 0;
+  for (var h = 0; h < 18; h++) {
+    var sa = aScores[h], sb = bScores[h];
+    if (!isDecided(sa) || !isDecided(sb)) continue;   // trou pas encore joué par les deux
+    if (sa === 'X' && sb === 'X') continue;            // les deux abandonnent → partagé
+    if (sa === 'X') { bWins++; continue; }
+    if (sb === 'X') { aWins++; continue; }
+    if (sa < sb) aWins++; else if (sb < sa) bWins++;   // égalité = partagé
+  }
+  return aWins - bWins;
+}
+function mpLabel(diff) {
+  if (diff === 0) return 'ALL SQUARE';
+  return Math.abs(diff) + (diff > 0 ? ' UP' : ' DOWN');
 }
 
 /* Charge les parcours depuis Firestore (gérés via la page admin).
@@ -295,8 +385,9 @@ function createGame() {
   toast('Création...');
   DB.collection('games').doc(id).set(data).then(function () {
     S.game = data; S.gameId = id; S.hole = 0; S.started = false;
-    S.scores = Array(18).fill(null); S.notified = {};
-    lset('tb_session', { id: id, hole: 0, scores: S.scores });
+    S.myPids = players.map(function (p) { return p.pid; });   // proprio + joueurs ajoutés
+    S.local = {}; S.writeTs = {}; S.activeKey = null; S.notified = {};
+    lset('tb_session', { id: id, hole: 0, myPids: S.myPids });
     attachGameListener(id);
     S.extras = []; renderPlayerList();
     setv('new-name', '');
@@ -322,11 +413,11 @@ function joinGameById(id) {
     }
     chain.then(function () {
       S.gameId = id; S.hole = 0; S.started = (data.status === 'playing');
-      S.scores = (data.scores && data.scores[myPid]) || Array(18).fill(null);
-      S.notified = {};
-      lset('tb_session', { id: id, hole: 0, scores: S.scores });
+      S.myPids = [myPid];          // sur ce téléphone, je ne gère que moi
+      S.local = {}; S.writeTs = {}; S.activeKey = null; S.notified = {};
+      lset('tb_session', { id: id, hole: 0, myPids: S.myPids });
       attachGameListener(id);
-      if (data.status === 'playing') { buildHolePicker(); go('s-game'); }
+      if (data.status === 'playing') { S.started = true; buildHolePicker(); go('s-game'); }
       else go('s-salon');
       renderHomeParties();
       toast('Partie rejointe ! 🎉', true);
@@ -420,6 +511,7 @@ function attachGameListener(id) {
     }
     S.game = snap.data();
     pulseLive();
+    if (!S.spectating) syncScoringState();
     if (!S.spectating && S.game.status === 'playing' && !S.started) {
       S.started = true; buildHolePicker(); go('s-game');
       toast('La partie commence ! ⛳', true);
@@ -430,6 +522,7 @@ function attachGameListener(id) {
     if (isActive('s-salon'))    renderSalon();
     if (isActive('s-scores'))   refreshScores();
     if (isActive('s-settings')) renderSettings();
+    if (isActive('s-game'))     refreshGameUI();
   }, function (err) { console.error('game', err); });
 }
 function isActive(id) { var e = document.getElementById(id); return e && e.classList.contains('active'); }
@@ -463,8 +556,13 @@ function renderSalon() {
   document.getElementById('sl-mode-hint').style.display = isHost ? 'none' : 'block';
 
   var ew = document.getElementById('sl-equipes-wrap');
-  if (MODES[g.mode].teams) {
+  var showTeams = MODES[g.mode].teams || MODES[g.mode].matchplay;
+  if (showTeams) {
     ew.style.display = 'block';
+    var note = document.getElementById('sl-equipes-note');
+    if (note) note.textContent = MODES[g.mode].matchplay
+      ? 'Match Play : laisse vide pour du 1 contre 1, ou forme 2 équipes pour du 2 contre 2.'
+      : 'Forme les équipes de 2.';
     renderTeams('sl-equipes');
     document.getElementById('sl-shuffle').style.display = isHost ? 'block' : 'none';
   } else ew.style.display = 'none';
@@ -516,13 +614,17 @@ function changeMode(m) {
   if (!FB_OK || !S.game) return;
   if (S.game.host !== S.player.pid) { toast('Seul l\'hôte peut changer le mode'); return; }
   var upd = { mode: m, updatedAt: firebase.firestore.FieldValue.serverTimestamp() };
-  upd.teams = MODES[m].teams ? autoTeams(S.game.players) : [];
+  // Scramble/MMB : équipes auto. Match Play : on laisse l'hôte choisir (1v1 ou 2v2). Autres : pas d'équipes.
+  if (MODES[m].teams) upd.teams = autoTeams(S.game.players);
+  else if (!MODES[m].matchplay) upd.teams = [];
   DB.collection('games').doc(S.gameId).update(upd);
 }
 function autoTeams(players) {
   var sh = (players || []).slice().sort(function () { return Math.random() - .5; });
   var teams = [];
-  for (var i = 0; i < sh.length; i += 2) teams.push({ players: [sh[i], sh[i + 1] || null] });
+  for (var i = 0; i < sh.length; i += 2) {
+    teams.push({ id: 'tm_' + Date.now() + '_' + (i / 2) + '_' + Math.random().toString(36).slice(2, 5), players: [sh[i], sh[i + 1] || null] });
+  }
   return teams;
 }
 function shuffleTeams() {
@@ -534,7 +636,11 @@ function shuffleTeams() {
 function launchGame() {
   if (!FB_OK || !S.game) return;
   if (S.game.host !== S.player.pid) { toast('Seul l\'hôte peut lancer'); return; }
-  if (MODES[S.game.mode].teams) {
+  var mode = MODES[S.game.mode] || {};
+  if (mode.matchplay) {
+    var sides = scoringUnits(S.game).length;
+    if (sides !== 2) { toast('Match Play : exactement 2 joueurs (1v1) ou 2 équipes (2v2)'); return; }
+  } else if (mode.teams) {
     var n = (S.game.players || []).length;
     if (n < 2) { toast('Ajoute au moins 2 joueurs'); return; }
     if (n % 2) { toast('Nombre pair de joueurs requis'); return; }
@@ -553,17 +659,58 @@ function renderSettings() {
   if (isHost) {
     renderModeButtons('set-mode-buttons', true);
     var ew = document.getElementById('set-equipes-wrap');
-    if (MODES[g.mode].teams) { ew.style.display = 'block'; renderTeams('set-equipes'); }
+    if (MODES[g.mode].teams || MODES[g.mode].matchplay) { ew.style.display = 'block'; renderTeams('set-equipes'); }
     else ew.style.display = 'none';
   }
 }
 
 /* ── Jeu : saisie ───────────────────────────────────────────────────────── */
+
+/* Barre de sélection : joueurs/équipes gérés sur ce téléphone */
+function renderUnitBar() {
+  var bar = document.getElementById('g-unitbar'); if (!bar) return;
+  syncScoringState();
+  if (!S.editable || S.editable.length <= 1) { bar.style.display = 'none'; bar.innerHTML = ''; return; }
+  bar.style.display = 'flex';
+  bar.innerHTML = '';
+  S.editable.forEach(function (u) {
+    var active = u.key === S.activeKey;
+    var chip = document.createElement('button');
+    chip.className = 'unit-chip' + (active ? ' active' : '');
+    chip.innerHTML = (u.type === 'team' ? '👥 ' : '') + esc(u.label);
+    chip.onclick = function () { setActiveEntity(u.key); };
+    bar.appendChild(chip);
+  });
+}
+function setActiveEntity(key) {
+  leaveHole();
+  S.activeKey = key;
+  updateGameHeader();
+  refreshGameUI();
+  renderUnitBar();
+}
+/* Cliquer le profil en haut à gauche = passer au joueur/équipe suivant */
+function cycleActive() {
+  if (!S.editable || S.editable.length <= 1) return;
+  var idx = 0;
+  for (var i = 0; i < S.editable.length; i++) if (S.editable[i].key === S.activeKey) idx = i;
+  var next = S.editable[(idx + 1) % S.editable.length];
+  setActiveEntity(next.key);
+  toast('Saisie : ' + next.label, true);
+}
+function updateGameHeader() {
+  var u = (S.editable || []).find(function (x) { return x.key === S.activeKey; });
+  if (!u) return;
+  txt('g-name', u.label.toUpperCase());
+  setAvatar('g-av', u.p || u.player, 'var(--green)');
+}
+
 function buildHolePicker() {
   var el = document.getElementById('g-holes'); if (!el) return; el.innerHTML = '';
+  var sc = getScores(S.activeKey);
   for (var i = 0; i < 18; i++) {
     var c = document.createElement('button');
-    c.className = 'hc' + (i === S.hole ? ' active' : '') + (S.scores[i] !== null ? ' done' : '');
+    c.className = 'hc' + (i === S.hole ? ' active' : '') + (sc[i] !== null && sc[i] !== undefined ? ' done' : '');
     c.textContent = i + 1;
     (function (idx) { c.onclick = function () { leaveHole(); S.hole = idx; refreshGameUI(); }; })(i);
     el.appendChild(c);
@@ -571,21 +718,32 @@ function buildHolePicker() {
 }
 function refreshGameUI() {
   if (!S.game) return;
-  var t = S.hole, par = S.game.coursePars[t], sc = S.scores[t];
+  syncScoringState();
+  updateGameHeader();
+  var t = S.hole, par = S.game.coursePars[t], sc = getScores(S.activeKey)[t];
   txt('g-hn', t + 1); txt('g-par', par);
   var sEl = document.getElementById('g-score'), lEl = document.getElementById('g-slabel'), eEl = document.getElementById('g-ecart');
-  if (sc === null) {
+  var crossBtn = document.getElementById('g-cross');
+  if (sc === 'X') {
+    sEl.textContent = '✕'; sEl.style.color = 'var(--red)';
+    lEl.textContent = 'CROIX'; lEl.style.color = 'var(--red)';
+    eEl.textContent = 'Trou non comptabilisé'; eEl.style.color = 'var(--muted)';
+    if (crossBtn) crossBtn.classList.add('active');
+  } else if (sc === null || sc === undefined) {
     sEl.textContent = '—'; sEl.style.color = 'var(--muted)';
     lEl.textContent = ''; eEl.textContent = 'Appuie sur + ou − pour scorer'; eEl.style.color = 'var(--muted)';
+    if (crossBtn) crossBtn.classList.remove('active');
   } else {
     var e = sc - par, info = scoreInfo(e);
     sEl.textContent = sc; sEl.style.color = info.color;
     lEl.textContent = info.label; lEl.style.color = info.color;
     eEl.textContent = e === 0 ? 'Égal au par' : (e > 0 ? '+' : '') + e + ' / Par ' + par;
     eEl.style.color = e <= 0 ? 'var(--green)' : 'var(--red)';
+    if (crossBtn) crossBtn.classList.remove('active');
   }
   var pv = document.getElementById('g-prev'); if (pv) pv.style.opacity = t === 0 ? '.4' : '1';
   buildHolePicker();
+  renderUnitBar();
   updateViewerDisplays();
 }
 function scoreInfo(e) {
@@ -597,24 +755,42 @@ function scoreInfo(e) {
   if (e === 2)  return { label: 'DOUBLE BOGEY', color: 'var(--red)' };
   return          { label: 'TRIPLE BOGEY +',   color: '#8B0000' };
 }
+function activeArr() {
+  if (!S.activeKey) return null;
+  if (!S.local[S.activeKey]) S.local[S.activeKey] = getScores(S.activeKey).slice();
+  return S.local[S.activeKey];
+}
 function chScore(d) {
-  if (!S.game) return;
-  var t = S.hole, par = S.game.coursePars[t], cur = S.scores[t];
-  var nxt = cur === null ? (d > 0 ? par : Math.max(1, par - 1)) : Math.max(1, cur + d);
-  S.scores[t] = nxt; S.notified[t] = false;
+  if (!S.game || !S.activeKey) return;
+  var arr = activeArr(); if (!arr) return;
+  var t = S.hole, par = S.game.coursePars[t], cur = arr[t];
+  var nxt = (typeof cur === 'number') ? Math.max(1, cur + d) : (d > 0 ? par : Math.max(1, par - 1));
+  arr[t] = nxt; S.notified[t] = false;
+  saveScore(); refreshGameUI();
+}
+function setCross() {
+  if (!S.game || !S.activeKey) return;
+  var arr = activeArr(); if (!arr) return;
+  var t = S.hole;
+  arr[t] = (arr[t] === 'X') ? null : 'X';
+  S.notified[t] = true;       // pas de toast birdie sur une croix
   saveScore(); refreshGameUI();
 }
 function saveScore() {
-  lset('tb_session', { id: S.gameId, hole: S.hole, scores: S.scores });
-  if (!FB_OK || !S.gameId || !S.player) return;
-  var upd = {}; upd['scores.' + S.player.pid] = S.scores;
+  if (!S.activeKey) return;
+  S.writeTs[S.activeKey] = Date.now();
+  lset('tb_session', { id: S.gameId, hole: S.hole, myPids: S.myPids });
+  if (!FB_OK || !S.gameId) return;
+  var upd = {}; upd['scores.' + S.activeKey] = S.local[S.activeKey];
   upd.updatedAt = firebase.firestore.FieldValue.serverTimestamp();
   DB.collection('games').doc(S.gameId).update(upd).catch(function (e) { console.error(e); });
 }
 function leaveHole() {
-  var t = S.hole, sc = S.scores[t];
-  if (sc === null || S.notified[t]) return;
-  var e = sc - S.game.coursePars[t], nom = S.player ? S.player.prenom : '';
+  var t = S.hole, sc = getScores(S.activeKey)[t];
+  if (typeof sc !== 'number' || S.notified[t]) return;
+  var u = (S.editable || []).find(function (x) { return x.key === S.activeKey; });
+  var nom = u ? u.label : '';
+  var e = sc - S.game.coursePars[t];
   if (e <= -2) { toast('🦅 Eagle ! Incroyable ' + nom + ' !', true); S.notified[t] = true; }
   else if (e === -1) { toast('🐦 Birdie ! Bien joué ' + nom + ' !', true); S.notified[t] = true; }
   else if (e >= 2) { toast('😅 Double bogey... ça arrive !'); S.notified[t] = true; }
@@ -624,35 +800,41 @@ function nextH() {
   if (S.hole < 17) { leaveHole(); S.hole++; refreshGameUI(); }
   else {
     leaveHole();
-    var done = S.scores.filter(function (s) { return s !== null; }).length;
+    var done = countPlayed(getScores(S.activeKey));
     toast(done === 18 ? '🏆 18 trous joués ! Bravo !' : 'Dernier trou · ' + done + '/18', done === 18);
   }
 }
 
 /* ── Scores + classement ────────────────────────────────────────────────── */
 function buildScoreEntities() {
-  var pars = S.game.coursePars, allScores = S.game.scores || {};
-  var ents = [];
-  if (MODES[S.game.mode].teams) {
-    (S.game.teams || []).forEach(function (t, i) {
-      var p0 = t.players[0], pid0 = p0 ? p0.pid : null;
-      var scores = (pid0 === S.player.pid && !S.spectating) ? S.scores : ((pid0 && allScores[pid0]) || Array(18).fill(null));
-      ents.push({ label: (p0 ? p0.prenom : '?') + ' & ' + (t.players[1] ? t.players[1].prenom : '?'), sub: 'Équipe ' + (i + 1), p: p0, scores: scores, me: !S.spectating && pid0 === S.player.pid });
-    });
-  } else {
-    (S.game.players || []).forEach(function (j) {
-      var me = !S.spectating && j.pid === S.player.pid;
-      var scores = me ? S.scores : (allScores[j.pid] || Array(18).fill(null));
-      ents.push({ label: j.prenom + (j.nom ? ' ' + j.nom[0] + '.' : ''), sub: 'Index ' + j.index, p: j, scores: scores, me: me });
-    });
-  }
-  ents.forEach(function (en) {
-    var pl = en.scores.filter(function (s) { return s !== null; });
-    en.n = pl.length; en.total = pl.reduce(function (a, b) { return a + b; }, 0);
-    var pa = pars.slice(0, en.n).reduce(function (a, b) { return a + b; }, 0);
-    en.ecart = en.n > 0 ? en.total - pa : 9999;
+  var pars = S.game.coursePars;
+  var units = scoringUnits(S.game);
+  var isMatch = (MODES[S.game.mode] || {}).matchplay;
+
+  var ents = units.map(function (u) {
+    var editable = u.players.some(function (p) { return S.myPids.indexOf(p.pid) >= 0; }) && !S.spectating;
+    var scores = (editable && S.local[u.key]) ? S.local[u.key] : getScores(u.key);
+    var sub = u.type === 'team' ? 'Équipe' : ('Index ' + (u.player ? u.player.index : '—'));
+    return { label: u.label, sub: sub, p: u.p, scores: scores, key: u.key, editable: editable, me: editable, type: u.type };
   });
-  ents.sort(function (a, b) { if (a.n === 0 && b.n === 0) return 0; if (a.n === 0) return 1; if (b.n === 0) return -1; return a.ecart - b.ecart; });
+
+  ents.forEach(function (en) {
+    en.n = countPlayed(en.scores);
+    en.total = sumNums(en.scores);
+    en.ecart = en.n > 0 ? en.total - parForNumeric(en.scores, pars) : 9999;
+  });
+
+  if (isMatch && ents.length === 2) {
+    var diff = matchPlayDiff(ents[0].scores, ents[1].scores, pars);
+    ents[0].mp = mpLabel(diff);
+    ents[1].mp = mpLabel(-diff);
+    ents[0]._mpVal = diff;
+    ents[1]._mpVal = -diff;
+    // Classement : celui qui mène en premier
+    ents.sort(function (a, b) { return b._mpVal - a._mpVal; });
+  } else {
+    ents.sort(function (a, b) { if (a.n === 0 && b.n === 0) return 0; if (a.n === 0) return 1; if (b.n === 0) return -1; return a.ecart - b.ecart; });
+  }
   return ents;
 }
 function refreshScores() {
@@ -667,9 +849,11 @@ function refreshScores() {
 }
 function scoreCard(en, rank, pars) {
   var medals = ['🥇', '🥈', '🥉'];
-  var pos = en.n > 0 ? (rank < 3 ? medals[rank] : '#' + (rank + 1)) : '–';
+  var isMatch = !!en.mp;
+  var pos = isMatch ? (en._mpVal > 0 ? '👑' : (en._mpVal < 0 ? '' : '=')) : (en.n > 0 ? (rank < 3 ? medals[rank] : '#' + (rank + 1)) : '–');
   function std(s, par) {
-    if (s === null) return '<td style="color:#ccc;font-size:12px;">·</td>';
+    if (s === null || s === undefined) return '<td style="color:#ccc;font-size:12px;">·</td>';
+    if (s === 'X') return '<td style="color:var(--red);font-weight:900;">✕</td>';
     var e = s - par, c = 'var(--text)', fw = '700';
     if (e <= -2) c = 'var(--gold)'; else if (e === -1) { c = 'var(--green)'; fw = '900'; }
     else if (e === 1) c = 'var(--orange)'; else if (e >= 2) { c = 'var(--red)'; fw = '900'; }
@@ -677,24 +861,36 @@ function scoreCard(en, rank, pars) {
   }
   var al = en.scores.slice(0, 9), ret = en.scores.slice(9, 18);
   var pAl = pars.slice(0, 9).reduce(function (a, b) { return a + b; }, 0), pRet = pars.slice(9, 18).reduce(function (a, b) { return a + b; }, 0);
-  var tAl = al.filter(function (s) { return s !== null; }).reduce(function (a, b) { return a + b; }, 0);
-  var tRet = ret.filter(function (s) { return s !== null; }).reduce(function (a, b) { return a + b; }, 0);
+  var tAl = sumNums(al), tRet = sumNums(ret);
   var ecTxt = en.n > 0 ? ((en.ecart >= 0 ? '+' : '') + en.ecart) : '';
   var ecCol = en.ecart <= 0 ? 'var(--green)' : 'var(--red)';
+
+  // Bloc de droite : Match Play (UP/DOWN) ou total classique
+  var rightBlock;
+  if (isMatch) {
+    var mpCol = en._mpVal > 0 ? 'var(--green)' : (en._mpVal < 0 ? 'var(--red)' : 'var(--text)');
+    rightBlock = '<div style="font-family:\'Barlow Condensed\',sans-serif;font-weight:900;font-size:24px;color:' + mpCol + ';">' + en.mp + '</div>' +
+                 '<div style="font-size:11px;color:var(--muted);">' + (en.n > 0 ? en.total + ' coups' : 'en attente') + '</div>';
+  } else {
+    rightBlock = '<div style="font-family:\'Barlow Condensed\',sans-serif;font-weight:900;font-size:30px;">' + (en.n > 0 ? en.total : '—') + '</div>' +
+                 (en.n > 0 ? '<div style="font-size:12px;color:' + ecCol + ';font-weight:700;">' + ecTxt + ' / par</div>' : '<div style="font-size:11px;color:var(--muted);">en attente</div>');
+  }
+
   var card = document.createElement('div'); card.className = 'card';
   card.style.border = en.me ? '2px solid var(--green)' : 'none';
+  if (en.editable) {
+    card.style.cursor = 'pointer';
+    card.onclick = function () { setActiveEntity(en.key); go('s-game'); };
+  }
   card.innerHTML =
     '<div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:14px;">' +
-      '<div style="display:flex;align-items:center;gap:10px;">' +
-        '<div style="font-family:\'Barlow Condensed\',sans-serif;font-weight:900;font-size:18px;min-width:28px;text-align:center;">' + pos + '</div>' +
+      '<div style="display:flex;align-items:center;gap:10px;min-width:0;">' +
+        '<div style="font-family:\'Barlow Condensed\',sans-serif;font-weight:900;font-size:18px;min-width:24px;text-align:center;">' + pos + '</div>' +
         avatarHTML(en.p, 34, en.me ? 'var(--green)' : 'var(--bg)', en.me ? '#fff' : 'var(--text)') +
-        '<div><div style="font-family:\'Barlow Condensed\',sans-serif;font-weight:800;font-size:16px;text-transform:uppercase;">' + en.label + '</div>' +
-        '<div style="font-size:11px;color:var(--muted);">' + en.sub + '</div></div>' +
+        '<div style="min-width:0;"><div style="font-family:\'Barlow Condensed\',sans-serif;font-weight:800;font-size:16px;text-transform:uppercase;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">' + esc(en.label) + (en.editable ? ' <span style="font-size:10px;color:var(--green);">✎</span>' : '') + '</div>' +
+        '<div style="font-size:11px;color:var(--muted);">' + esc(en.sub) + '</div></div>' +
       '</div>' +
-      '<div style="text-align:right;">' +
-        '<div style="font-family:\'Barlow Condensed\',sans-serif;font-weight:900;font-size:30px;">' + (en.n > 0 ? en.total : '—') + '</div>' +
-        (en.n > 0 ? '<div style="font-size:12px;color:' + ecCol + ';font-weight:700;">' + ecTxt + ' / par</div>' : '<div style="font-size:11px;color:var(--muted);">en attente</div>') +
-      '</div>' +
+      '<div style="text-align:right;flex-shrink:0;">' + rightBlock + '</div>' +
     '</div>' +
     '<div style="overflow-x:auto;-webkit-overflow-scrolling:touch;"><table class="st" style="min-width:100%;">' +
       '<tr><th></th>' + [1, 2, 3, 4, 5, 6, 7, 8, 9].map(function (n) { return '<th>' + n + '</th>'; }).join('') + '<th class="tot">Al.</th></tr>' +
@@ -713,15 +909,25 @@ function endGame() {
   if (!S.game) return; leaveHole();
   txt('fin-sub', (S.game.name || S.game.courseName) + ' · ' + MODES[S.game.mode].label);
   var pars = S.game.coursePars;
-  var total = S.scores.filter(function (s) { return s !== null; }).reduce(function (a, b) { return a + b; }, 0);
-  var n = S.scores.filter(function (s) { return s !== null; }).length;
-  var pa = pars.slice(0, n).reduce(function (a, b) { return a + b; }, 0), ec = total - pa;
-  document.getElementById('fin-body').innerHTML =
-    '<div class="card" style="text-align:center;">' +
-    '<div style="font-family:\'Barlow Condensed\',sans-serif;font-weight:700;font-size:12px;color:var(--muted);text-transform:uppercase;margin-bottom:8px;">' + (S.player ? S.player.prenom : 'Joueur') + '</div>' +
-    '<div style="font-family:\'Barlow Condensed\',sans-serif;font-weight:900;font-size:72px;line-height:1;">' + (total || '—') + '</div>' +
-    '<div style="font-size:16px;color:' + (ec <= 0 ? 'var(--green)' : 'var(--red)') + ';font-weight:700;margin-top:8px;">' + (ec >= 0 ? '+' : '') + ec + ' / par</div>' +
-    '<div style="font-size:12px;color:var(--muted);margin-top:6px;">' + n + '/18 trous complétés</div></div>';
+  var ents = buildScoreEntities();
+  var isMatch = (MODES[S.game.mode] || {}).matchplay;
+  var body = document.getElementById('fin-body');
+  body.innerHTML = '';
+  // Vainqueur en tête
+  var top = ents[0];
+  if (top && (top.n > 0 || isMatch)) {
+    var winTxt = isMatch ? (top._mpVal > 0 ? top.label + ' gagne (' + top.mp + ')' : (top._mpVal === 0 ? 'Match nul' : '')) : top.label;
+    var head = document.createElement('div');
+    head.className = 'card';
+    head.style.cssText = 'text-align:center;background:var(--green);';
+    head.innerHTML =
+      '<div style="font-size:12px;color:rgba(255,255,255,.85);font-family:\'Barlow Condensed\',sans-serif;font-weight:700;text-transform:uppercase;letter-spacing:.05em;">🏆 ' + (isMatch ? 'Résultat' : 'Vainqueur') + '</div>' +
+      '<div style="font-family:\'Barlow Condensed\',sans-serif;font-weight:900;font-size:26px;color:#fff;text-transform:uppercase;margin-top:4px;">' + esc(winTxt || top.label) + '</div>' +
+      (isMatch ? '' : '<div style="font-size:14px;color:rgba(255,255,255,.9);font-weight:700;">' + top.total + ' coups · ' + (top.ecart >= 0 ? '+' : '') + top.ecart + ' / par</div>');
+    body.appendChild(head);
+  }
+  // Toutes les cartes
+  ents.forEach(function (en, rank) { body.appendChild(scoreCard(en, rank, pars)); });
   go('s-fin');
 }
 /* Quand on confirme la fin : on se retire de la partie. Le dernier supprime le doc. */
@@ -734,22 +940,24 @@ function quitGame() {
 }
 function leaveAndMaybeDelete(done) {
   if (!FB_OK || !S.gameId) { done(); return; }
-  var id = S.gameId, myPid = S.player.pid;
+  var id = S.gameId;
+  var leaving = (S.myPids && S.myPids.length) ? S.myPids.slice() : [S.player.pid];
   DB.collection('games').doc(id).get().then(function (snap) {
     if (!snap.exists) { done(); return; }
     var data = snap.data();
-    var remaining = (data.players || []).filter(function (p) { return p.pid !== myPid; });
+    var remaining = (data.players || []).filter(function (p) { return leaving.indexOf(p.pid) < 0; });
     if (remaining.length === 0) {
-      // dernier joueur → on supprime toute la partie
+      // plus personne → on supprime toute la partie
       DB.collection('games').doc(id).delete().then(done).catch(function (e) { console.error(e); done(); });
     } else {
-      var ns = Object.assign({}, data.scores); delete ns[myPid];
-      // Si l'hôte part, transférer à un autre joueur
+      var ns = Object.assign({}, data.scores);
+      leaving.forEach(function (pid) { delete ns[pid]; });
+      // Transfert d'hôte si l'hôte part
       var newHost = data.host;
-      if (data.host === myPid) newHost = remaining[0].pid;
-      // Retirer des équipes éventuelles
+      if (leaving.indexOf(data.host) >= 0) newHost = remaining[0].pid;
+      // Retirer des équipes (en conservant les id stables)
       var teams = (data.teams || []).map(function (t) {
-        return { players: t.players.filter(function (pp) { return pp && pp.pid !== myPid; }) };
+        return { id: t.id, players: t.players.filter(function (pp) { return pp && leaving.indexOf(pp.pid) < 0; }) };
       }).filter(function (t) { return t.players.length > 0; });
       DB.collection('games').doc(id).update({
         players: remaining, scores: ns, host: newHost, teams: teams,
@@ -763,7 +971,8 @@ function clearSessionLocal() {
   if (S.unsub) { S.unsub(); S.unsub = null; }
   stopHeartbeat();
   S.game = null; S.gameId = null; S.hole = 0; S.started = false; S.spectating = false;
-  S.scores = Array(18).fill(null); S.extras = []; S.notified = {};
+  S.myPids = []; S.editable = []; S.activeKey = null; S.local = {}; S.writeTs = {};
+  S.extras = []; S.notified = {};
   localStorage.removeItem('tb_session');
   renderPlayerList(); renderHomeParties();
 }
@@ -774,8 +983,9 @@ function renderHomeParties() {
   if (!c || !e) return;
   if (!S.gameId || S.spectating) { c.innerHTML = ''; e.style.display = 'block'; return; }
   e.style.display = 'none';
-  var n = S.scores.filter(function (s) { return s !== null; }).length;
-  var tot = S.scores.filter(function (s) { return s !== null; }).reduce(function (a, b) { return a + b; }, 0);
+  var myScores = S.activeKey ? getScores(S.activeKey) : Array(18).fill(null);
+  var n = countPlayed(myScores);
+  var tot = sumNums(myScores);
   var pct = Math.round(n / 18 * 100);
   var name = (S.game && (S.game.name || S.game.courseName)) || 'Partie';
   var mlabel = (S.game && MODES[S.game.mode]) ? MODES[S.game.mode].label : '';
@@ -803,7 +1013,7 @@ function spectateGame(id) {
   if (!FB_OK) { toast('⚠️ Firebase indisponible'); return; }
   if (S.gameId && !S.spectating) { toast('Termine ta partie avant de regarder une autre'); return; }
   S.gameId = id; S.spectating = true; S.started = true;
-  S.scores = Array(18).fill(null);
+  S.myPids = []; S.editable = []; S.activeKey = null; S.local = {};
   attachGameListener(id);
   registerViewer();
   startHeartbeat();

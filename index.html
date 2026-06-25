@@ -145,7 +145,8 @@
         <div id="sl-mode-hint" style="display:none;margin-top:8px;font-size:12px;color:var(--muted);">⏳ Seul l'hôte peut choisir le mode.</div>
       </div>
       <div id="sl-equipes-wrap" style="display:none;">
-        <div class="L" style="margin-bottom:12px;">Équipes</div>
+        <div class="L" style="margin-bottom:6px;">Équipes</div>
+        <div id="sl-equipes-note" style="font-size:12px;color:var(--muted);margin-bottom:12px;line-height:1.4;"></div>
         <div id="sl-equipes" style="display:flex;flex-direction:column;gap:10px;margin-bottom:12px;"></div>
         <button class="btn B-out" id="sl-shuffle" onclick="shuffleTeams()">🔀 Former / mélanger les équipes</button>
       </div>
@@ -161,13 +162,14 @@
   <!-- ════════ JEU ════════ -->
   <div class="screen" id="s-game">
     <div style="background:var(--bg);padding:52px 20px 8px;display:flex;align-items:center;justify-content:space-between;">
-      <div style="display:flex;align-items:center;gap:10px;"><div id="g-av" class="av" style="width:34px;height:34px;font-size:15px;background:var(--green);">M</div><span class="D" style="font-size:17px;" id="g-name">MON NOM</span></div>
+      <button onclick="cycleActive()" style="display:flex;align-items:center;gap:10px;background:none;border:none;padding:0;cursor:pointer;-webkit-tap-highlight-color:transparent;" title="Changer de joueur"><div id="g-av" class="av" style="width:34px;height:34px;font-size:15px;background:var(--green);">M</div><span class="D" style="font-size:17px;" id="g-name">MON NOM</span></button>
       <div style="display:flex;align-items:center;gap:8px;">
         <span id="g-viewers" style="display:none;align-items:center;gap:3px;font-family:'Barlow Condensed',sans-serif;font-weight:700;font-size:13px;color:var(--muted);">👁 <span id="g-viewers-n">0</span></span>
         <button class="btn B-ico" onclick="go('s-scores')"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="18" height="18" rx="2"/><line x1="3" y1="9" x2="21" y2="9"/><line x1="3" y1="15" x2="21" y2="15"/><line x1="9" y1="9" x2="9" y2="21"/></svg></button>
         <button class="btn B-ico" onclick="go('s-menu')"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><line x1="3" y1="6" x2="21" y2="6"/><line x1="3" y1="12" x2="21" y2="12"/><line x1="3" y1="18" x2="21" y2="18"/></svg></button>
       </div>
     </div>
+    <div id="g-unitbar" style="display:none;gap:8px;overflow-x:auto;padding:6px 20px 0;background:var(--bg);scrollbar-width:none;-webkit-overflow-scrolling:touch;"></div>
     <div style="background:var(--bg);padding:6px 0 8px;"><div class="holes-row" id="g-holes"></div></div>
     <div style="flex:1;display:flex;flex-direction:column;align-items:center;justify-content:center;padding:8px 24px;">
       <div class="L" style="margin-bottom:6px;">Trou <span id="g-hn">1</span> · Par <span id="g-par">4</span></div>
@@ -178,10 +180,14 @@
         <button class="btn" onclick="chScore(1)" style="width:64px;height:64px;border-radius:50%;background:var(--green);border:none;font-size:34px;color:#fff;flex-shrink:0;">+</button>
       </div>
       <div id="g-ecart" style="font-family:'Barlow Condensed',sans-serif;font-weight:700;font-size:16px;color:var(--muted);text-align:center;min-height:22px;"></div>
+      <button id="g-cross" onclick="setCross()" style="margin-top:14px;background:#fff;border:2px solid var(--border);border-radius:30px;padding:8px 18px;font-family:'Barlow Condensed',sans-serif;font-weight:700;font-size:13px;color:var(--muted);text-transform:uppercase;letter-spacing:.05em;cursor:pointer;-webkit-tap-highlight-color:transparent;">✕ Faire une croix</button>
     </div>
-    <div style="padding:14px 24px 14px;display:flex;gap:12px;">
+    <div style="padding:10px 24px 8px;display:flex;gap:12px;">
       <button class="btn B-out" id="g-prev" onclick="prevH()" style="flex:1;">← Préc.</button>
       <button class="btn B-dark" onclick="nextH()" style="flex:1.4;">Trou suivant →</button>
+    </div>
+    <div style="padding:0 24px 10px;">
+      <button class="btn" onclick="endGame()" style="background:#FFF0F0;color:var(--red);border-radius:var(--r);padding:13px;width:100%;font-family:'Barlow Condensed',sans-serif;font-weight:800;font-size:14px;letter-spacing:.05em;text-transform:uppercase;gap:8px;">🏁 Terminer la partie</button>
     </div>
   </div>
 
@@ -250,8 +256,9 @@
 
   <!-- ════════ FIN ════════ -->
   <div class="screen" id="s-fin">
-    <div class="banner" style="padding:70px 24px 40px;text-align:center;">
-      <div style="font-size:52px;margin-bottom:12px;">🏆</div>
+    <div class="banner" style="padding:56px 24px 40px;text-align:center;position:relative;">
+      <button class="btn B-ico" onclick="go('s-game')" style="position:absolute;left:24px;top:52px;background:rgba(255,255,255,.2);border:none;" title="Retour à la saisie"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#fff" stroke-width="2.5"><path d="M19 12H5M12 5l-7 7 7 7"/></svg></button>
+      <div style="font-size:52px;margin-bottom:12px;margin-top:8px;">🏆</div>
       <div class="D" style="font-size:36px;color:#fff;">Partie terminée !</div>
       <div style="font-size:15px;color:rgba(255,255,255,.8);margin-top:8px;" id="fin-sub"></div>
     </div>
