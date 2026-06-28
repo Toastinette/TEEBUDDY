@@ -73,6 +73,15 @@
       <label class="muted" style="display:block;margin-bottom:6px;">Par de chaque trou (1 à 18)</label>
       <div id="cf-pars" style="display:grid;grid-template-columns:repeat(9,1fr);gap:6px;"></div>
     </div>
+    <div style="margin-bottom:12px;">
+      <label class="muted" style="display:block;margin-bottom:6px;">Handicap (difficulté) de chaque trou — valeurs 1 à 18, sans doublon</label>
+      <div id="cf-hcp" style="display:grid;grid-template-columns:repeat(9,1fr);gap:6px;"></div>
+      <div id="cf-hcp-warn" style="font-size:12px;color:var(--red);margin-top:6px;display:none;"></div>
+    </div>
+    <div style="margin-bottom:12px;display:flex;align-items:center;gap:10px;">
+      <label class="muted">Valeur de la croix en Stroke Play : par +</label>
+      <input class="inp" id="cf-croix" type="number" min="1" max="10" value="4" style="width:70px;">
+    </div>
     <div class="row">
       <div class="muted">Par total : <strong id="cf-total" style="color:var(--text);">—</strong></div>
       <button class="btn btn-green" onclick="saveCourse()">💾 Enregistrer le parcours</button>
@@ -87,9 +96,30 @@
 <script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-firestore-compat.js"></script>
 <script src="config.js"></script>
 <script>
-  var DB=null, OK=false;
-  try { firebase.initializeApp(window.FIREBASE_CONFIG); DB=firebase.firestore(); OK=true; }
-  catch(e){ console.error(e); }
+  /* Config Firebase intégrée directement (l'admin ne dépend plus de config.js
+     pour fonctionner). Si tu changes de projet Firebase, modifie aussi ce bloc. */
+  var FALLBACK_FIREBASE = {
+    apiKey: "AIzaSyDl6TojOx07QV6R8lxRkq2LebMcM3og720",
+    authDomain: "teebuddy-f4df9.firebaseapp.com",
+    projectId: "teebuddy-f4df9",
+    storageBucket: "teebuddy-f4df9.firebasestorage.app",
+    messagingSenderId: "235732896235",
+    appId: "1:235732896235:web:3767c93dcd4280398031ae"
+  };
+  var FALLBACK_MODES = {
+    stroke:{label:'Stroke Play'}, scramble:{label:'Scramble'},
+    mmb:{label:'Meilleure moins bonne'}, matchplay:{label:'Match Play'}
+  };
+  var MODES_REF = window.MODES || FALLBACK_MODES;
+  var CFG = window.FIREBASE_CONFIG || FALLBACK_FIREBASE;
+
+  var DB=null, OK=false, INITERR='';
+  if (typeof firebase === 'undefined') {
+    INITERR = "Les scripts Firebase ne se sont pas chargés (vérifie ta connexion internet).";
+  } else {
+    try { firebase.initializeApp(CFG); DB=firebase.firestore(); OK=true; }
+    catch(e){ console.error(e); INITERR = e.message; }
+  }
 
   function esc(s){ return String(s==null?'':s).replace(/[&<>"]/g,function(c){return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c];}); }
   function fmtDate(ts){ if(!ts||!ts.seconds) return '—'; var d=new Date(ts.seconds*1000); return d.toLocaleString('fr-FR'); }
@@ -97,7 +127,7 @@
 
   function loadGames(){
     var box=document.getElementById('games');
-    if(!OK){ box.innerHTML='<div class="empty">Firebase indisponible</div>'; return; }
+    if(!OK){ box.innerHTML='<div class="empty">⚠️ Firebase indisponible<br><span style="font-size:12px;">'+esc(INITERR)+'</span></div>'; return; }
     box.innerHTML='<div class="empty">Chargement...</div>';
     DB.collection('games').get().then(function(snap){
       if(snap.empty){ box.innerHTML='<div class="empty">Aucune partie active 🎉</div>'; return; }
@@ -110,17 +140,22 @@
         var badge=g.status==='playing'?'<span class="badge live">en cours</span>':'<span class="badge lobby">salon</span>';
         // Mini résumé des scores
         var nbScored=0;
-        if(g.scores){ Object.keys(g.scores).forEach(function(k){ if(g.scores[k].some(function(s){return s!==null;})) nbScored++; }); }
+        if(g.scores){ Object.keys(g.scores).forEach(function(k){ if(g.scores[k] && g.scores[k].some(function(s){return s!==null;})) nbScored++; }); }
         html+='<div class="card">'+
           '<div class="row"><div><strong style="font-size:16px;">'+esc(g.name||g.courseName)+'</strong> '+badge+'<br>'+
-          '<span class="muted">Code <code>'+esc(g._id)+'</code> · '+esc(g.courseName)+' · '+(window.MODES[g.mode]?window.MODES[g.mode].label:g.mode)+'</span></div>'+
+          '<span class="muted">Code <code>'+esc(g._id)+'</code> · '+esc(g.courseName)+' · '+(MODES_REF[g.mode]?MODES_REF[g.mode].label:g.mode)+'</span></div>'+
           '<button class="btn btn-red" onclick="delGame(\''+g._id+'\')">🗑 Supprimer</button></div>'+
           '<div style="margin-top:10px;">'+players+'</div>'+
           '<div class="muted" style="margin-top:8px;">'+(g.players||[]).length+' joueur(s) · '+nbScored+' ont scoré · créée '+fmtDate(g.createdAt)+' · maj '+fmtDate(g.updatedAt)+'</div>'+
           '</div>';
       });
       box.innerHTML=html;
-    }).catch(function(e){ box.innerHTML='<div class="empty">Erreur : '+esc(e.message)+'</div>'; });
+    }).catch(function(e){
+      var msg=(e&&e.code==='permission-denied')||/permission/i.test(e.message||'')
+        ? 'Accès refusé par Firestore. Tes règles de sécurité ont peut-être expiré (mode test limité à 30 jours). Va dans la console Firebase → Firestore → Règles et autorise les collections games et courses.'
+        : esc(e.message);
+      box.innerHTML='<div class="empty">⚠️ '+msg+'</div>';
+    });
   }
 
   function delGame(id){
@@ -171,12 +206,15 @@
     var html='';
     list.forEach(function(c){
       var editable=c._source==='firestore';
-      html+='<div class="card"><div class="row"><div><strong>'+esc(c.nom)+'</strong> <span class="muted">('+c.trous+' trous · Par '+c.parTotal+')</span>'+
+      var hcpRow = (c.hcp && c.hcp.length===18)
+        ? '<tr><td>Hcp</td>'+c.hcp.map(function(h){return '<td style="color:var(--muted);">'+h+'</td>';}).join('')+'</tr>'
+        : '<tr><td colspan="19" style="color:var(--red);font-size:12px;">⚠️ Handicaps des trous non renseignés (net/Stableford indisponibles)</td></tr>';
+      html+='<div class="card"><div class="row"><div><strong>'+esc(c.nom)+'</strong> <span class="muted">('+c.trous+' trous · Par '+c.parTotal+' · croix par+'+(typeof c.croixValue==='number'?c.croixValue:4)+')</span>'+
         (editable?'':' <span class="badge lobby">défaut</span>')+'</div><div>'+
         (editable?'<button class="btn btn-dark" onclick="editCourse(\''+c.id+'\')">✎ Modifier</button> <button class="btn btn-red" onclick="delCourse(\''+c.id+'\')">🗑</button>':'')+
         '</div></div>'+
         '<table><tr><th>Trou</th>'+c.pars.map(function(_,i){return '<th>'+(i+1)+'</th>';}).join('')+'</tr>'+
-        '<tr><td>Par</td>'+c.pars.map(function(p){return '<td>'+p+'</td>';}).join('')+'</tr></table></div>';
+        '<tr><td>Par</td>'+c.pars.map(function(p){return '<td>'+p+'</td>';}).join('')+'</tr>'+hcpRow+'</table></div>';
     });
     box.innerHTML=html;
   }
@@ -190,12 +228,34 @@
         '<input class="inp" id="par-'+i+'" type="number" min="3" max="6" value="4" style="padding:8px 4px;text-align:center;" oninput="updateTotal()">';
       wrap.appendChild(d);
     }
-    updateTotal();
+    var hw=document.getElementById('cf-hcp'); hw.innerHTML='';
+    for(var j=0;j<18;j++){
+      var h=document.createElement('div');
+      h.innerHTML='<div style="font-size:10px;color:var(--muted);text-align:center;margin-bottom:2px;">'+(j+1)+'</div>'+
+        '<input class="inp" id="hcp-'+j+'" type="number" min="1" max="18" placeholder="-" style="padding:8px 4px;text-align:center;" oninput="checkHcp()">';
+      hw.appendChild(h);
+    }
+    updateTotal(); checkHcp();
   }
   function updateTotal(){
     var t=0;
     for(var i=0;i<18;i++){ t+=parseInt(document.getElementById('par-'+i).value)||0; }
     document.getElementById('cf-total').textContent=t;
+  }
+  function getHcps(){
+    var a=[]; for(var i=0;i<18;i++){ a.push(parseInt(document.getElementById('hcp-'+i).value)||0); } return a;
+  }
+  /* Contrôle anti-doublon (et 1..18). Retourne true si valide. */
+  function checkHcp(){
+    var warn=document.getElementById('cf-hcp-warn');
+    var h=getHcps();
+    var filled=h.filter(function(v){return v>=1&&v<=18;});
+    var seen={}, dup=false, bad=false;
+    h.forEach(function(v){ if(v){ if(v<1||v>18)bad=true; if(seen[v])dup=true; seen[v]=1; } });
+    if(bad){ warn.style.display='block'; warn.textContent='⚠️ Les handicaps doivent être entre 1 et 18.'; return false; }
+    if(dup){ warn.style.display='block'; warn.textContent='⚠️ Doublon détecté : chaque valeur 1 à 18 doit être unique.'; return false; }
+    if(filled.length>0 && filled.length<18){ warn.style.display='block'; warn.style.color='var(--muted)'; warn.textContent='ℹ️ '+filled.length+'/18 renseignés (à compléter pour le calcul net/Stableford).'; return false; }
+    warn.style.display='none'; warn.style.color='var(--red)'; return true;
   }
   function slugify(s){
     return s.toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g,'').replace(/[^a-z0-9]+/g,'-').replace(/^-+|-+$/g,'').slice(0,40)||('parcours-'+Date.now());
@@ -207,11 +267,20 @@
     var pars=[];
     for(var i=0;i<18;i++){ var v=parseInt(document.getElementById('par-'+i).value)||0; if(v<3||v>6){ alert('Le par du trou '+(i+1)+' doit être entre 3 et 6'); return; } pars.push(v); }
     var total=pars.reduce(function(a,b){return a+b;},0);
+    // Handicaps : optionnels, mais si renseignés ils doivent être valides (1..18 sans doublon)
+    var hcps=getHcps();
+    var anyHcp=hcps.some(function(v){return v>0;});
+    var hcpValid=true; var seen={};
+    if(anyHcp){
+      for(var k=0;k<18;k++){ var hv=hcps[k]; if(hv<1||hv>18||seen[hv]){ hcpValid=false; break; } seen[hv]=1; }
+      if(!hcpValid){ alert('Les handicaps de trous doivent aller de 1 à 18 sans doublon (ou laisse tout vide).'); return; }
+    }
+    var croix=parseInt(document.getElementById('cf-croix').value)||4;
     var editing=document.getElementById('cf-editing').value;
     var id=editing||slugify(nom);
-    DB.collection('courses').doc(id).set({
-      nom:nom, trous:18, pars:pars, parTotal:total
-    }).then(function(){
+    var doc={ nom:nom, trous:18, pars:pars, parTotal:total, croixValue:croix };
+    if(anyHcp && hcpValid) doc.hcp=hcps;
+    DB.collection('courses').doc(id).set(doc).then(function(){
       alert('Parcours « '+nom+' » enregistré ✓');
       resetCourseForm(); loadCourses();
     }).catch(function(e){ alert('Erreur : '+e.message); });
@@ -222,7 +291,9 @@
       var c=snap.data();
       document.getElementById('cf-nom').value=c.nom;
       for(var i=0;i<18;i++){ document.getElementById('par-'+i).value=c.pars[i]||4; }
-      updateTotal();
+      for(var j=0;j<18;j++){ document.getElementById('hcp-'+j).value=(c.hcp&&c.hcp[j])?c.hcp[j]:''; }
+      document.getElementById('cf-croix').value=(typeof c.croixValue==='number')?c.croixValue:4;
+      updateTotal(); checkHcp();
       document.getElementById('cf-editing').value=id;
       document.getElementById('form-title').textContent='Modifier : '+c.nom;
       document.getElementById('form-cancel').style.display='inline-block';
@@ -231,6 +302,7 @@
   }
   function resetCourseForm(){
     document.getElementById('cf-nom').value='';
+    document.getElementById('cf-croix').value=4;
     document.getElementById('cf-editing').value='';
     document.getElementById('form-title').textContent='Ajouter un parcours';
     document.getElementById('form-cancel').style.display='none';

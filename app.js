@@ -39,6 +39,25 @@ var S = {
 };
 var selCourse = (COURSES[0] && COURSES[0].id) || null;
 
+/* ── Banque de messages (variés, marrants, tirés au hasard) ────────────── */
+var MSG = {
+  condor:    ['{n} entre dans la LÉGENDE 🐉', 'Un condor ?! {n}, c\'est irréel', '{n} vient de défier les lois du golf 🤯'],
+  albatross: ['ALBATROS pour {n} ! 🦅 chapeau bas', '{n} signe un albatros, respect total', 'Inarrêtable, {n} plante un albatros'],
+  eagle:     ['🦅 EAGLE ! {n} est en feu', 'Quel eagle {n}, magnifique', '{n} plante un eagle de patron', 'Eagle ! {n} régale tout le monde'],
+  birdie:    ['🐦 Birdie pour {n} !', 'Joli birdie {n} 👏', '{n} gratte un birdie, la classe', 'Birdie tranquille pour {n} 🔥', '{n} pose un birdie comme un pro'],
+  par:       ['Par solide {n} 🟢', '{n} fait le job, par', 'Tranquille, {n} assure le par', 'Par carré pour {n} 👌'],
+  parComeback: ['Enfin te revoilà dans la course {n} ! 💪', 'Ouf, un par {n}, ça repart', '{n} stoppe l\'hémorragie avec un par 😅', 'Le par du soulagement pour {n}', 'Bon retour parmi les vivants {n} ⛳'],
+  bogey:     ['Bogey pour {n}, on se rattrape', '{n} lâche un bogey, rien de grave', 'Petit bogey {n}, focus 🎯', '{n} concède un bogey, la suite sera meilleure'],
+  double:    ['Double bogey {n}... ça arrive 😬', 'Aïe, +2 pour {n}', '{n} prend un double, on respire et on repart', 'Pas le trou de {n} 🙈'],
+  triple:    ['Triple bogey {n}... le trou était piégé 😵', 'Ouch, +3 pour {n}, on efface', '{n} a laissé des plumes sur ce trou 🪶', 'Trou compliqué pour {n}, on tourne la page'],
+  worse:     ['Trou cauchemar pour {n} 🙈 on oublie', '{n}... ce trou restera entre nous 🤐', 'Gros carton pour {n}, la revanche au prochain', 'Aïe aïe aïe {n}, on respire un coup'],
+  croix:     ['Croix pour {n} ❌ on passe à autre chose', '{n} ramasse, croix sur le trou', 'Balle perdue ? Croix pour {n}, suivant ! 🏌️', '{n} fait une croix, ça nettoie la tête']
+};
+function pickMsg(type, name) {
+  var arr = MSG[type] || MSG.par;
+  return arr[Math.floor(Math.random() * arr.length)].replace(/\{n\}/g, name || '');
+}
+
 /* ── Boot ───────────────────────────────────────────────────────────────── */
 function boot() {
   applyLogos();
@@ -154,9 +173,26 @@ function getScores(key) {
 
 /* Un trou est "décidé" s'il a un chiffre ou une croix */
 function isDecided(v) { return typeof v === 'number' || v === 'X'; }
-function sumNums(arr) { return arr.reduce(function (a, b) { return a + (typeof b === 'number' ? b : 0); }, 0); }
 function countPlayed(arr) { return arr.filter(function (s) { return s !== null && s !== undefined; }).length; }
-function parForNumeric(scores, pars) { var s = 0; for (var i = 0; i < scores.length; i++) { if (typeof scores[i] === 'number') s += pars[i]; } return s; }
+
+/* Valeur de croix de la partie (par + cette valeur en Stroke Play) */
+function gCroixVal() { return (S.game && typeof S.game.croixValue === 'number') ? S.game.croixValue : 4; }
+/* Valeur en coups d'un trou : chiffre, ou par+croix si croix, ou null si pas joué */
+function holeVal(v, par, croixV) {
+  if (typeof v === 'number') return v;
+  if (v === 'X') return par + (typeof croixV === 'number' ? croixV : 4);
+  return null;
+}
+/* Total brut (la croix compte comme par + valeur) */
+function totalStrokes(scores, pars, croixV) {
+  var t = 0; for (var i = 0; i < scores.length; i++) { var hv = holeVal(scores[i], pars[i], croixV); if (hv !== null) t += hv; } return t;
+}
+/* Somme des pars des trous joués (chiffre ou croix) */
+function parPlayed(scores, pars) {
+  var s = 0; for (var i = 0; i < scores.length; i++) { if (scores[i] !== null && scores[i] !== undefined) s += pars[i]; } return s;
+}
+/* Conservé pour compat (somme des seuls chiffres) */
+function sumNums(arr) { return arr.reduce(function (a, b) { return a + (typeof b === 'number' ? b : 0); }, 0); }
 
 /* Match Play : différence de trous gagnés (positif = A mène) */
 function matchPlayDiff(aScores, bScores, pars) {
@@ -356,6 +392,17 @@ function renderPlayerList() {
 function newGameId() {
   return String(Math.floor(1000 + Math.random() * 9000));
 }
+function setPrivacy(priv) {
+  var cb = document.getElementById('new-private'); if (cb) cb.checked = priv;
+  var bPub = document.getElementById('priv-public'), bPriv = document.getElementById('priv-private');
+  if (bPub) bPub.className = 'btn ' + (priv ? 'B-pill-out' : 'B-pill');
+  if (bPriv) bPriv.className = 'btn ' + (priv ? 'B-pill' : 'B-pill-out');
+  bPub.style.flex = '1'; bPriv.style.flex = '1';
+  var note = document.getElementById('priv-note');
+  if (note) note.textContent = priv
+    ? 'Privée : visible dans la liste, mais il faut le code (affiché dans ton salon) pour rejoindre.'
+    : 'Publique : visible et rejoignable par tous depuis l\'accueil.';
+}
 
 function createGame() {
   if (!S.player) { toast('Crée ton profil d\'abord 👆'); go('s-profil'); return; }
@@ -370,12 +417,18 @@ function createGame() {
 
   var id = newGameId();
   var scores = {}; players.forEach(function (j) { scores[j.pid] = Array(18).fill(null); });
+  var isPrivate = !!(document.getElementById('new-private') && document.getElementById('new-private').checked);
 
   var data = {
     name: nom,
     courseId: course.id, courseName: course.nom,
-    coursePars: course.pars, parTotal: course.parTotal,
+    coursePars: course.pars,
+    courseHcp: course.hcp || null,
+    parTotal: course.parTotal,
+    croixValue: (typeof course.croixValue === 'number' ? course.croixValue : 4),
     mode: 'stroke', host: S.player.pid,
+    isPrivate: isPrivate,
+    code: isPrivate ? String(Math.floor(1000 + Math.random() * 9000)) : null,
     players: players, teams: [], scores: scores,
     status: 'lobby',
     createdAt: firebase.firestore.FieldValue.serverTimestamp(),
@@ -473,12 +526,13 @@ function renderOpenGames(games) {
     var more = g.players.length > 4 ? '<span style="font-size:11px;color:var(--muted);margin-left:4px;">+' + (g.players.length - 4) + '</span>' : '';
     var nViewers = countViewers(g);
     var viewerBadge = nViewers > 0 ? '<span style="font-size:11px;color:var(--muted);margin-left:8px;">👁 ' + nViewers + '</span>' : '';
+    var lock = g.isPrivate ? '<span title="Privée" style="margin-right:5px;">🔒</span>' : '';
 
     var card = document.createElement('div');
     card.className = 'card';
     card.innerHTML =
       '<div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:10px;gap:10px;">' +
-        '<div style="min-width:0;"><div style="font-family:\'Barlow Condensed\',sans-serif;font-weight:900;font-size:17px;text-transform:uppercase;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">' + esc(g.name || g.courseName) + '</div>' +
+        '<div style="min-width:0;"><div style="font-family:\'Barlow Condensed\',sans-serif;font-weight:900;font-size:17px;text-transform:uppercase;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">' + lock + esc(g.name || g.courseName) + '</div>' +
         '<div style="font-size:12px;color:var(--muted);">' + esc(g.courseName) + ' · ' + mode + ' · ' + statusTxt + '</div></div>' +
         '<div style="display:flex;align-items:center;gap:8px;flex-shrink:0;">' +
           '<button class="eye-btn" title="Regarder"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="var(--text)" stroke-width="2"><path d="M1 12s4-7 11-7 11 7 11 7-4 7-11 7-11-7-11-7z"/><circle cx="12" cy="12" r="3"/></svg></button>' +
@@ -488,11 +542,20 @@ function renderOpenGames(games) {
       '<div style="display:flex;align-items:center;gap:4px;">' + avatars + more +
         '<span style="font-size:12px;color:var(--muted);margin-left:8px;">' + g.players.length + ' joueur' + (g.players.length > 1 ? 's' : '') + (host ? ' · hôte ' + esc(host) : '') + '</span>' + viewerBadge +
       '</div>';
-    // Clics
-    card.querySelector('.join-pill').onclick = function (ev) { ev.stopPropagation(); joinGameById(g._id); };
-    card.querySelector('.eye-btn').onclick = function (ev) { ev.stopPropagation(); spectateGame(g._id); };
+    // Clics (parties privées : code requis)
+    card.querySelector('.join-pill').onclick = function (ev) { ev.stopPropagation(); gateThen(g, function () { joinGameById(g._id); }); };
+    card.querySelector('.eye-btn').onclick = function (ev) { ev.stopPropagation(); gateThen(g, function () { spectateGame(g._id); }); };
     box.appendChild(card);
   });
+}
+/* Pour les parties privées : demande le code (sauf si on est déjà dedans) */
+function gateThen(g, cb) {
+  if (!g.isPrivate) { cb(); return; }
+  if (g.players && g.players.some(function (p) { return p.pid === S.player.pid; })) { cb(); return; }
+  var code = prompt('🔒 Partie privée « ' + (g.name || '') + ' »\n\nEntre le code à 4 chiffres :');
+  if (code === null) return;
+  if (String(code).trim() === String(g.code)) cb();
+  else toast('Code incorrect ❌');
 }
 
 /* ── Listener : partie en cours ────────────────────────────────────────── */
@@ -511,6 +574,14 @@ function attachGameListener(id) {
     }
     S.game = snap.data();
     pulseLive();
+    // Détecter si on a été retiré de la partie par l'hôte
+    if (!S.spectating && S.myPids.length && (S.game.players || []).length &&
+        !S.myPids.some(function (pid) { return S.game.players.some(function (p) { return p.pid === pid; }); })) {
+      toast('Tu as été retiré de la partie');
+      clearSessionLocal();
+      go('s-home');
+      return;
+    }
     if (!S.spectating) syncScoringState();
     if (!S.spectating && S.game.status === 'playing' && !S.started) {
       S.started = true; buildHolePicker(); go('s-game');
@@ -538,16 +609,23 @@ function renderSalon() {
   var isHost = g.host === S.player.pid;
   txt('sl-name', g.name || g.courseName);
   txt('sl-parcours', g.courseName);
+  var pv = document.getElementById('sl-private');
+  if (pv) {
+    if (g.isPrivate && g.code) { pv.style.display = 'block'; txt('sl-code', g.code); }
+    else pv.style.display = 'none';
+  }
 
   var jl = document.getElementById('sl-joueurs'); jl.innerHTML = '';
   (g.players || []).forEach(function (j) {
     var me = j.pid === S.player.pid;
     var crown = j.pid === g.host ? ' <span style="font-size:10px;">👑</span>' : '';
+    var canKick = isHost && j.pid !== g.host;   // l'hôte peut retirer les autres
     var d = document.createElement('div');
     d.style.cssText = 'display:flex;align-items:center;gap:10px;padding:12px 14px;background:#fff;border-radius:14px;box-shadow:0 1px 6px rgba(0,0,0,.05);' + (me ? 'border:2px solid var(--green);' : '');
     d.innerHTML = avatarHTML(j, 34, 'var(--green)') +
       '<div style="font-family:\'Barlow Condensed\',sans-serif;font-weight:700;font-size:15px;text-transform:uppercase;color:var(--text);">' + j.prenom + crown + (me ? ' <span style="font-size:11px;color:var(--green);">(moi)</span>' : '') + '</div>' +
-      '<div style="margin-left:auto;font-size:12px;color:var(--muted);">Index ' + j.index + '</div>';
+      '<div style="margin-left:auto;font-size:12px;color:var(--muted);">Index ' + j.index + '</div>' +
+      (canKick ? '<button class="x-btn" title="Retirer" style="margin-left:8px;" onclick="kickPlayer(\'' + j.pid + '\',\'' + esc(j.prenom).replace(/'/g, "\\'") + '\')">×</button>' : '');
     jl.appendChild(d);
   });
   txt('sl-count', (g.players || []).length);
@@ -627,6 +705,22 @@ function autoTeams(players) {
   }
   return teams;
 }
+/* L'hôte retire un joueur de la partie */
+function kickPlayer(pid, prenom) {
+  if (!FB_OK || !S.game) return;
+  if (S.game.host !== S.player.pid) { toast('Seul l\'hôte peut retirer un joueur'); return; }
+  if (!confirm('Retirer ' + prenom + ' de la partie ?')) return;
+  var remaining = (S.game.players || []).filter(function (p) { return p.pid !== pid; });
+  var ns = Object.assign({}, S.game.scores); delete ns[pid];
+  var teams = (S.game.teams || []).map(function (t) {
+    return { id: t.id, players: t.players.filter(function (pp) { return pp && pp.pid !== pid; }) };
+  }).filter(function (t) { return t.players.length > 0; });
+  DB.collection('games').doc(S.gameId).update({
+    players: remaining, scores: ns, teams: teams,
+    updatedAt: firebase.firestore.FieldValue.serverTimestamp()
+  }).then(function () { toast(prenom + ' a été retiré', true); }).catch(function (e) { console.error(e); });
+}
+
 function shuffleTeams() {
   if (!FB_OK || S.game.host !== S.player.pid) return;
   DB.collection('games').doc(S.gameId).update({ teams: autoTeams(S.game.players) }).then(function () {
@@ -772,8 +866,13 @@ function setCross() {
   if (!S.game || !S.activeKey) return;
   var arr = activeArr(); if (!arr) return;
   var t = S.hole;
-  arr[t] = (arr[t] === 'X') ? null : 'X';
+  var becomingCross = arr[t] !== 'X';
+  arr[t] = becomingCross ? 'X' : null;
   S.notified[t] = true;       // pas de toast birdie sur une croix
+  if (becomingCross) {
+    var u = (S.editable || []).find(function (x) { return x.key === S.activeKey; });
+    toast(pickMsg('croix', u ? u.label : ''));
+  }
   saveScore(); refreshGameUI();
 }
 function saveScore() {
@@ -785,15 +884,37 @@ function saveScore() {
   upd.updatedAt = firebase.firestore.FieldValue.serverTimestamp();
   DB.collection('games').doc(S.gameId).update(upd).catch(function (e) { console.error(e); });
 }
+function isComeback(t) {
+  var sc = getScores(S.activeKey), over = 0, seen = 0;
+  for (var i = t - 1; i >= 0 && seen < 2; i--) {
+    var v = sc[i]; if (!isDecided(v)) continue;
+    seen++;
+    var ee = (v === 'X') ? 2 : (v - S.game.coursePars[i]);
+    if (ee > 0) over++; else break;   // un par ou mieux casse la série
+  }
+  return over >= 2;
+}
 function leaveHole() {
   var t = S.hole, sc = getScores(S.activeKey)[t];
-  if (typeof sc !== 'number' || S.notified[t]) return;
+  if (!isDecided(sc) || sc === 'X' || S.notified[t]) return;   // la croix a son message dans setCross
   var u = (S.editable || []).find(function (x) { return x.key === S.activeKey; });
   var nom = u ? u.label : '';
   var e = sc - S.game.coursePars[t];
-  if (e <= -2) { toast('🦅 Eagle ! Incroyable ' + nom + ' !', true); S.notified[t] = true; }
-  else if (e === -1) { toast('🐦 Birdie ! Bien joué ' + nom + ' !', true); S.notified[t] = true; }
-  else if (e >= 2) { toast('😅 Double bogey... ça arrive !'); S.notified[t] = true; }
+  var type, good = e <= 0;
+  if (e <= -4) type = 'condor';
+  else if (e === -3) type = 'albatross';
+  else if (e === -2) type = 'eagle';
+  else if (e === -1) type = 'birdie';
+  else if (e === 0) type = isComeback(t) ? 'parComeback' : 'par';
+  else if (e === 1) type = 'bogey';
+  else if (e === 2) type = 'double';
+  else if (e === 3) type = 'triple';
+  else type = 'worse';
+  // Le par "neutre" ne s'affiche pas systématiquement (sauf comeback)
+  var show = true;
+  if (type === 'par') show = Math.random() < 0.45;
+  if (show) toast(pickMsg(type, nom), good);
+  S.notified[t] = true;
 }
 function prevH() { if (S.hole > 0) { leaveHole(); S.hole--; refreshGameUI(); } }
 function nextH() {
@@ -820,8 +941,8 @@ function buildScoreEntities() {
 
   ents.forEach(function (en) {
     en.n = countPlayed(en.scores);
-    en.total = sumNums(en.scores);
-    en.ecart = en.n > 0 ? en.total - parForNumeric(en.scores, pars) : 9999;
+    en.total = totalStrokes(en.scores, pars, gCroixVal());
+    en.ecart = en.n > 0 ? en.total - parPlayed(en.scores, pars) : 9999;
   });
 
   if (isMatch && ents.length === 2) {
@@ -861,7 +982,8 @@ function scoreCard(en, rank, pars) {
   }
   var al = en.scores.slice(0, 9), ret = en.scores.slice(9, 18);
   var pAl = pars.slice(0, 9).reduce(function (a, b) { return a + b; }, 0), pRet = pars.slice(9, 18).reduce(function (a, b) { return a + b; }, 0);
-  var tAl = sumNums(al), tRet = sumNums(ret);
+  var cv = gCroixVal();
+  var tAl = totalStrokes(al, pars.slice(0, 9), cv), tRet = totalStrokes(ret, pars.slice(9, 18), cv);
   var ecTxt = en.n > 0 ? ((en.ecart >= 0 ? '+' : '') + en.ecart) : '';
   var ecCol = en.ecart <= 0 ? 'var(--green)' : 'var(--red)';
 
@@ -985,7 +1107,7 @@ function renderHomeParties() {
   e.style.display = 'none';
   var myScores = S.activeKey ? getScores(S.activeKey) : Array(18).fill(null);
   var n = countPlayed(myScores);
-  var tot = sumNums(myScores);
+  var tot = totalStrokes(myScores, S.game ? S.game.coursePars : Array(18).fill(0), gCroixVal());
   var pct = Math.round(n / 18 * 100);
   var name = (S.game && (S.game.name || S.game.courseName)) || 'Partie';
   var mlabel = (S.game && MODES[S.game.mode]) ? MODES[S.game.mode].label : '';

@@ -15,10 +15,12 @@ window.COURSES = [
     nom: 'Bassin Bleu',
     trous: 18,
     pars: [4, 3, 4, 4, 5, 3, 4, 4, 5, 3, 4, 3, 4, 5, 3, 4, 4, 5],
-    parTotal: 72
+    hcp:  [10, 6, 8, 4, 14, 16, 12, 17, 2, 5, 7, 13, 9, 11, 15, 1, 3, 18],
+    parTotal: 72,
+    croixValue: 4
   }
   // Pour ajouter un parcours, copie le bloc ci-dessus :
-  // { id:'mon-golf', nom:'Mon Golf', trous:18, pars:[...18 valeurs...], parTotal: XX }
+  // { id:'mon-golf', nom:'Mon Golf', trous:18, pars:[...18 valeurs...], hcp:[...18 valeurs 1-18...], parTotal: XX, croixValue: 4 }
 ];
 
 /* ── Modes de jeu ───────────────────────────────────────────────────────────

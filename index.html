@@ -10,8 +10,6 @@
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Barlow+Condensed:wght@400;600;700;800;900&family=Barlow:wght@400;500;600&display=swap">
 <link rel="stylesheet" href="style.css">
-<link rel="manifest" href="manifest.json">
-<link rel="apple-touch-icon" href="apple-touch-icon.png">
 </head>
 <body>
 <div id="app">
@@ -112,6 +110,15 @@
       <div><div class="L" style="margin-bottom:12px;">Nom de la partie</div>
         <input class="inp normal" id="new-name" placeholder="Ex : Partie du dimanche" maxlength="40" autocomplete="off"></div>
       <div><div class="L" style="margin-bottom:12px;">Parcours</div><div id="list-parcours" style="display:flex;flex-direction:column;gap:8px;"></div></div>
+      <div>
+        <div class="L" style="margin-bottom:12px;">Confidentialité</div>
+        <div style="display:flex;gap:8px;">
+          <button type="button" id="priv-public" class="btn B-pill" onclick="setPrivacy(false)" style="flex:1;">🌍 Publique</button>
+          <button type="button" id="priv-private" class="btn B-pill-out" onclick="setPrivacy(true)" style="flex:1;">🔒 Privée</button>
+        </div>
+        <input type="checkbox" id="new-private" style="display:none;">
+        <div id="priv-note" style="font-size:12px;color:var(--muted);margin-top:8px;line-height:1.4;">Publique : visible et rejoignable par tous depuis l'accueil.</div>
+      </div>
       <div class="hint">💡 Le <strong>mode de jeu</strong> et les <strong>équipes</strong> se choisissent dans le salon, une fois tes potes connectés. Tu pourras aussi les changer à tout moment pendant la partie.</div>
       <div><div class="L" style="margin-bottom:12px;">Joueurs sur ce téléphone</div>
         <div id="list-joueurs" style="display:flex;flex-direction:column;gap:8px;margin-bottom:10px;"></div>
@@ -135,6 +142,10 @@
         <div style="text-align:right;"><div class="L" style="color:rgba(255,255,255,.7);">Salon</div><div class="D" style="font-size:22px;color:#fff;" id="sl-name">—</div></div>
       </div>
       <div><div class="L" style="color:rgba(255,255,255,.6);font-size:10px;">Parcours</div><div class="D" style="font-size:18px;color:#fff;" id="sl-parcours">—</div></div>
+      <div id="sl-private" style="display:none;margin-top:12px;background:rgba(0,0,0,.18);border-radius:12px;padding:12px 16px;">
+        <div class="L" style="color:rgba(255,255,255,.7);font-size:10px;">🔒 Partie privée · Code à partager</div>
+        <div class="D" style="font-size:30px;color:#fff;letter-spacing:6px;" id="sl-code">----</div>
+      </div>
     </div>
     <div style="padding:24px;display:flex;flex-direction:column;gap:20px;">
       <div>
