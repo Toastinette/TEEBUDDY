@@ -230,6 +230,22 @@ function netAvailable() {
   return S.game && S.game.mode === 'stroke' && !!gameHcp();
 }
 
+/* ── Stableford ────────────────────────────────────────────────────────── */
+/* Points d'un trou : 2 - (net - par), plancher 0. Croix/double+ = 0. */
+function holeStableford(v, par, st, croixV) {
+  if (v === null || v === undefined) return null;
+  var net = holeVal(v, par, croixV) - (st || 0);
+  return Math.max(0, 2 - (net - par));
+}
+function stablefordTotal(scores, pars, strokes, croixV) {
+  var t = 0, n = 0;
+  for (var i = 0; i < 18; i++) {
+    var p = holeStableford(scores[i], pars[i], strokes ? strokes[i] : 0, croixV);
+    if (p !== null) { t += p; n++; }
+  }
+  return { total: t, n: n };
+}
+
 /* Match Play : différence de trous gagnés (positif = A mène) */
 function matchPlayDiff(aScores, bScores, pars) {
   var aWins = 0, bWins = 0;
@@ -633,6 +649,17 @@ function attachGameListener(id) {
       return;
     }
     if (!S.spectating) syncScoringState();
+    // Notifications DF (résultat de vote) pour tout le monde
+    if (S.game.lastDF && S.game.lastDF.at !== S._lastDFat) {
+      var fresh = Date.now() - S.game.lastDF.at < 10000;
+      S._lastDFat = S.game.lastDF.at;
+      if (S.started && fresh) toast('⛳ DF confirmé pour ' + S.game.lastDF.name + ' ! (×1)', true);
+    }
+    if (S.game.lastDFCancel && S.game.lastDFCancel.at !== S._lastDFCancelAt) {
+      var fresh2 = Date.now() - S.game.lastDFCancel.at < 10000;
+      S._lastDFCancelAt = S.game.lastDFCancel.at;
+      if (S.started && fresh2) toast('Vote DF annulé (pas de majorité)');
+    }
     if (!S.spectating && S.game.status === 'playing' && !S.started) {
       S.started = true; buildHolePicker(); go('s-game');
       toast('La partie commence ! ⛳', true);
@@ -1035,6 +1062,10 @@ function refreshGameUI() {
   var pv = document.getElementById('g-prev'); if (pv) pv.style.opacity = t === 0 ? '.4' : '1';
   buildHolePicker();
   renderUnitBar();
+  // Départ du joueur actif + box de vote DF
+  var dEl = document.getElementById('g-depart');
+  if (dEl) { var dp = (S.game.departs || {})[activePlayerPid()]; dEl.value = dp || ''; }
+  renderVoteBox();
   updateViewerDisplays();
 }
 function scoreInfo(e) {
@@ -1123,6 +1154,123 @@ function nextH() {
   }
 }
 
+/* ════════════════════════════════════════════════════════════════════════
+   VOTE DF — chaque joueur saisit son numéro de départ ; un joueur peut lancer
+   un vote contre un autre de SON départ ; majorité de Oui = +1 au compteur DF.
+════════════════════════════════════════════════════════════════════════ */
+
+/* pid dont on édite le départ : le joueur actif (si individuel), sinon moi */
+function activePlayerPid() {
+  var u = (S.editable || []).find(function (x) { return x.key === S.activeKey; });
+  if (u && u.type === 'player' && u.player) return u.player.pid;
+  return S.player ? S.player.pid : null;
+}
+function playerName(pid) {
+  var p = (S.game.players || []).find(function (x) { return x.pid === pid; });
+  return p ? p.prenom : '?';
+}
+function saveDepart() {
+  if (!FB_OK || !S.game) return;
+  var v = (document.getElementById('g-depart').value || '').trim();
+  var pid = activePlayerPid(); if (!pid) return;
+  var departs = Object.assign({}, S.game.departs || {});
+  if (v === '') delete departs[pid]; else departs[pid] = String(v);
+  DB.collection('games').doc(S.gameId).update({ departs: departs, updatedAt: firebase.firestore.FieldValue.serverTimestamp() });
+}
+/* Membres d'un départ (pids) */
+function departMembers(dep) {
+  var d = S.game.departs || {};
+  return (S.game.players || []).filter(function (p) { return d[p.pid] === dep; }).map(function (p) { return p.pid; });
+}
+function openDF() {
+  if (!S.game) return;
+  var myPid = S.player.pid;
+  var dep = (S.game.departs || {})[myPid];
+  if (!dep) { toast('Indique d\'abord ton numéro de départ'); return; }
+  if (S.game.vote) { toast('Un vote DF est déjà en cours'); return; }
+  var mates = departMembers(dep).filter(function (pid) { return pid !== myPid; });
+  if (mates.length === 0) { toast('Personne d\'autre dans ton départ ' + dep); return; }
+  showDFPicker(mates);
+}
+function showDFPicker(mates) {
+  var list = document.getElementById('df-picker-list'); list.innerHTML = '';
+  mates.forEach(function (pid) {
+    var p = (S.game.players || []).find(function (x) { return x.pid === pid; });
+    var b = document.createElement('button');
+    b.className = 'btn B-out';
+    b.style.cssText = 'width:100%;justify-content:flex-start;gap:10px;';
+    b.innerHTML = avatarHTML(p, 30, 'var(--orange)') + '<span style="font-family:\'Barlow Condensed\',sans-serif;font-weight:800;font-size:16px;text-transform:uppercase;">' + esc(p.prenom) + '</span>';
+    b.onclick = function () { closeDFPicker(); createVote(pid); };
+    list.appendChild(b);
+  });
+  document.getElementById('df-picker').style.display = 'flex';
+}
+function closeDFPicker() { document.getElementById('df-picker').style.display = 'none'; }
+
+function createVote(targetPid) {
+  if (!FB_OK || !S.game) return;
+  var myPid = S.player.pid;
+  var dep = (S.game.departs || {})[myPid];
+  var votes = {}; votes[myPid] = true;          // l'initiateur vote Oui d'office
+  var vote = {
+    id: 'v_' + Date.now(),
+    targetPid: targetPid, target: playerName(targetPid),
+    byPid: myPid, by: playerName(myPid),
+    depart: dep, votes: votes, createdAt: Date.now()
+  };
+  DB.collection('games').doc(S.gameId).update({ vote: vote, updatedAt: firebase.firestore.FieldValue.serverTimestamp() })
+    .then(function () { toast('Vote DF lancé contre ' + vote.target + ' ⛳'); resolveVoteIfNeeded(); });
+}
+/* Suis-je éligible pour voter sur le vote en cours ? */
+function voteEligible() {
+  var v = S.game && S.game.vote; if (!v) return false;
+  var myPid = S.player.pid;
+  if (myPid === v.targetPid) return false;
+  return (S.game.departs || {})[myPid] === v.depart;
+}
+function renderVoteBox() {
+  var box = document.getElementById('g-vote'); if (!box) return;
+  var v = S.game && S.game.vote;
+  if (!v || !voteEligible() || (v.votes && v.votes[S.player.pid] !== undefined)) {
+    box.style.display = 'none'; box.innerHTML = ''; return;
+  }
+  box.style.display = 'block';
+  box.innerHTML =
+    '<div style="background:#FFF6EC;border:2px solid var(--orange);border-radius:16px;padding:12px 14px;display:flex;align-items:center;gap:10px;">' +
+      '<div style="flex:1;font-family:\'Barlow Condensed\',sans-serif;font-weight:800;font-size:15px;text-transform:uppercase;color:var(--text);">DF pour ' + esc(v.target) + ' ?<div style="font-size:11px;color:var(--muted);font-weight:600;text-transform:none;">Proposé par ' + esc(v.by) + '</div></div>' +
+      '<button onclick="castVote(true)" style="background:var(--green);border:none;color:#fff;border-radius:30px;padding:8px 16px;font-family:\'Barlow Condensed\',sans-serif;font-weight:800;cursor:pointer;">Oui</button>' +
+      '<button onclick="castVote(false)" style="background:#fff;border:2px solid var(--border);color:var(--muted);border-radius:30px;padding:8px 16px;font-family:\'Barlow Condensed\',sans-serif;font-weight:800;cursor:pointer;">Non</button>' +
+    '</div>';
+}
+function castVote(yes) {
+  if (!FB_OK || !S.game || !S.game.vote) return;
+  var upd = {}; upd['vote.votes.' + S.player.pid] = !!yes;
+  DB.collection('games').doc(S.gameId).update(upd).then(function () { resolveVoteIfNeeded(); });
+}
+/* Résolution : la majorité des éligibles (membres du départ sauf la cible) */
+function resolveVoteIfNeeded() {
+  var v = S.game && S.game.vote; if (!v) return;
+  var eligible = departMembers(v.depart).filter(function (pid) { return pid !== v.targetPid; });
+  var N = eligible.length; if (N === 0) return;
+  var yes = 0, no = 0;
+  eligible.forEach(function (pid) { var val = v.votes ? v.votes[pid] : undefined; if (val === true) yes++; else if (val === false) no++; });
+  var need = Math.floor(N / 2) + 1;
+  if (yes >= need) {
+    var df = Object.assign({}, S.game.df || {});
+    df[v.targetPid] = (df[v.targetPid] || 0) + 1;
+    DB.collection('games').doc(S.gameId).update({
+      df: df, vote: null,
+      lastDF: { name: v.target, at: Date.now() },
+      updatedAt: firebase.firestore.FieldValue.serverTimestamp()
+    });
+  } else if (no > N - need) {
+    DB.collection('games').doc(S.gameId).update({
+      vote: null, lastDFCancel: { name: v.target, at: Date.now() },
+      updatedAt: firebase.firestore.FieldValue.serverTimestamp()
+    });
+  }
+}
+
 /* ── Scores + classement ────────────────────────────────────────────────── */
 function buildScoreEntities() {
   var pars = S.game.coursePars;
@@ -1140,6 +1288,7 @@ function buildScoreEntities() {
 
   var cv = gCroixVal();
   var useNet = S.netView && netAvailable();
+  var isStab = (MODES[S.game.mode] || {}).stableford;
   ents.forEach(function (en) {
     // Coups rendus par trou (joueurs individuels uniquement)
     en.strokes = (en.type === 'player' && en.player) ? strokesArray(en.player.index) : null;
@@ -1153,6 +1302,11 @@ function buildScoreEntities() {
     en.total = showNet ? net.total : gross.total;
     en.ecart = showNet ? net.ecart : gross.ecart;
     en.showNet = showNet;
+    // Stableford
+    if (isStab) {
+      en.stableford = true;
+      en.points = stablefordTotal(en.scores, pars, en.strokes, cv).total;
+    }
   });
 
   if (isMatch && ents.length === 2) {
@@ -1161,8 +1315,10 @@ function buildScoreEntities() {
     ents[1].mp = mpLabel(-diff);
     ents[0]._mpVal = diff;
     ents[1]._mpVal = -diff;
-    // Classement : celui qui mène en premier
     ents.sort(function (a, b) { return b._mpVal - a._mpVal; });
+  } else if (isStab) {
+    // Stableford : le plus de points gagne (en attente = en bas)
+    ents.sort(function (a, b) { if (a.n === 0 && b.n === 0) return 0; if (a.n === 0) return 1; if (b.n === 0) return -1; return b.points - a.points; });
   } else {
     ents.sort(function (a, b) { if (a.n === 0 && b.n === 0) return 0; if (a.n === 0) return 1; if (b.n === 0) return -1; return a.ecart - b.ecart; });
   }
@@ -1194,9 +1350,18 @@ function scoreCard(en, rank, pars) {
   var pos = isMatch ? (en._mpVal > 0 ? '👑' : (en._mpVal < 0 ? '' : '=')) : (en.n > 0 ? (rank < 3 ? medals[rank] : '#' + (rank + 1)) : '–');
   var strokes = en.strokes || Array(18).fill(0);
   var showNet = en.showNet;
+  var cv0 = gCroixVal();
   function std(s, par, holeIdx) {
     var st = strokes[holeIdx] || 0;
     var dots = st > 0 ? '<span style="color:var(--green);font-size:8px;vertical-align:super;letter-spacing:-1px;">' + (st >= 2 ? '••' : '•') + '</span>' : '';
+    // Stableford : on affiche les points du trou
+    if (en.stableford) {
+      var pts = holeStableford(s, par, st, cv0);
+      if (pts === null) return '<td style="color:#ccc;font-size:12px;">·' + dots + '</td>';
+      var pc = pts === 0 ? 'var(--red)' : (pts === 1 ? 'var(--orange)' : (pts === 2 ? 'var(--text)' : 'var(--green)'));
+      var pf = pts >= 3 ? '900' : '700';
+      return '<td style="color:' + pc + ';font-weight:' + pf + ';">' + pts + dots + '</td>';
+    }
     if (s === null || s === undefined) return '<td style="color:#ccc;font-size:12px;">·' + dots + '</td>';
     if (s === 'X') return '<td style="color:var(--red);font-weight:900;">✕' + dots + '</td>';
     var shown = showNet ? (s - st) : s;
@@ -1208,23 +1373,34 @@ function scoreCard(en, rank, pars) {
   var al = en.scores.slice(0, 9), ret = en.scores.slice(9, 18);
   var pAl = pars.slice(0, 9).reduce(function (a, b) { return a + b; }, 0), pRet = pars.slice(9, 18).reduce(function (a, b) { return a + b; }, 0);
   var cv = gCroixVal();
-  var tAl = unitTotals(al, pars.slice(0, 9), strokes.slice(0, 9), cv, showNet).total;
-  var tRet = unitTotals(ret, pars.slice(9, 18), strokes.slice(9, 18), cv, showNet).total;
+  var tAl, tRet;
+  if (en.stableford) {
+    tAl = stablefordTotal(al, pars.slice(0, 9), strokes.slice(0, 9), cv).total;
+    tRet = stablefordTotal(ret, pars.slice(9, 18), strokes.slice(9, 18), cv).total;
+  } else {
+    tAl = unitTotals(al, pars.slice(0, 9), strokes.slice(0, 9), cv, showNet).total;
+    tRet = unitTotals(ret, pars.slice(9, 18), strokes.slice(9, 18), cv, showNet).total;
+  }
   var ecTxt = en.n > 0 ? ((en.ecart >= 0 ? '+' : '') + en.ecart) : '';
   var ecCol = en.ecart <= 0 ? 'var(--green)' : 'var(--red)';
   var netTag = showNet ? ' <span style="font-size:10px;color:var(--green);">NET</span>' : '';
 
-  // Bloc de droite : Match Play (UP/DOWN) ou total classique
+  // Bloc de droite : Match Play, Stableford, ou total classique
   var rightBlock;
   if (isMatch) {
     var mpCol = en._mpVal > 0 ? 'var(--green)' : (en._mpVal < 0 ? 'var(--red)' : 'var(--text)');
     rightBlock = '<div style="font-family:\'Barlow Condensed\',sans-serif;font-weight:900;font-size:24px;color:' + mpCol + ';">' + en.mp + '</div>' +
                  '<div style="font-size:11px;color:var(--muted);">' + (en.n > 0 ? en.total + ' coups' : 'en attente') + '</div>';
+  } else if (en.stableford) {
+    rightBlock = '<div style="font-family:\'Barlow Condensed\',sans-serif;font-weight:900;font-size:30px;color:var(--green);">' + (en.n > 0 ? en.points : '—') + '</div>' +
+                 '<div style="font-size:11px;color:var(--muted);">' + (en.n > 0 ? 'points' : 'en attente') + '</div>';
   } else {
     rightBlock = '<div style="font-family:\'Barlow Condensed\',sans-serif;font-weight:900;font-size:30px;">' + (en.n > 0 ? en.total : '—') + netTag + '</div>' +
                  (en.n > 0 ? '<div style="font-size:12px;color:' + ecCol + ';font-weight:700;">' + ecTxt + ' / par</div>' : '<div style="font-size:11px;color:var(--muted);">en attente</div>');
   }
 
+  var dfCount = (en.type === 'player' && en.player && S.game.df) ? (S.game.df[en.player.pid] || 0) : 0;
+  var dfBadge = dfCount > 0 ? ' <span style="display:inline-block;background:var(--orange);color:#fff;font-size:10px;font-weight:800;padding:1px 7px;border-radius:20px;vertical-align:middle;">DF ×' + dfCount + '</span>' : '';
   var card = document.createElement('div'); card.className = 'card';
   card.style.border = en.me ? '2px solid var(--green)' : 'none';
   if (en.editable) {
@@ -1239,7 +1415,7 @@ function scoreCard(en, rank, pars) {
       '<div style="display:flex;align-items:center;gap:10px;min-width:0;">' +
         '<div style="font-family:\'Barlow Condensed\',sans-serif;font-weight:900;font-size:18px;min-width:24px;text-align:center;">' + pos + '</div>' +
         avatarHTML(en.p, 34, en.me ? 'var(--green)' : 'var(--bg)', en.me ? '#fff' : 'var(--text)') +
-        '<div style="min-width:0;"><div style="font-family:\'Barlow Condensed\',sans-serif;font-weight:800;font-size:16px;text-transform:uppercase;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">' + esc(en.label) + (en.editable ? ' <span style="font-size:10px;color:var(--green);">✎</span>' : '') + '</div>' +
+        '<div style="min-width:0;"><div style="font-family:\'Barlow Condensed\',sans-serif;font-weight:800;font-size:16px;text-transform:uppercase;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">' + esc(en.label) + dfBadge + (en.editable ? ' <span style="font-size:10px;color:var(--green);">✎</span>' : '') + '</div>' +
         '<div style="font-size:11px;color:var(--muted);">' + esc(en.sub) + '</div></div>' +
       '</div>' +
       '<div style="display:flex;align-items:center;gap:8px;flex-shrink:0;"><div style="text-align:right;">' + rightBlock + '</div>' + removeBtn + '</div>' +
@@ -1267,19 +1443,24 @@ function endGame() {
   var pars = S.game.coursePars;
   var ents = buildScoreEntities();
   var isMatch = (MODES[S.game.mode] || {}).matchplay;
+  var isStab = (MODES[S.game.mode] || {}).stableford;
   var body = document.getElementById('fin-body');
   body.innerHTML = '';
   // Vainqueur en tête
   var top = ents[0];
   if (top && (top.n > 0 || isMatch)) {
     var winTxt = isMatch ? (top._mpVal > 0 ? top.label + ' gagne (' + top.mp + ')' : (top._mpVal === 0 ? 'Match nul' : '')) : top.label;
+    var detail = '';
+    if (isMatch) detail = '';
+    else if (isStab) detail = '<div style="font-size:14px;color:rgba(255,255,255,.9);font-weight:700;">' + top.points + ' points</div>';
+    else detail = '<div style="font-size:14px;color:rgba(255,255,255,.9);font-weight:700;">' + top.total + ' coups · ' + (top.ecart >= 0 ? '+' : '') + top.ecart + ' / par</div>';
     var head = document.createElement('div');
     head.className = 'card';
     head.style.cssText = 'text-align:center;background:var(--green);';
     head.innerHTML =
       '<div style="font-size:12px;color:rgba(255,255,255,.85);font-family:\'Barlow Condensed\',sans-serif;font-weight:700;text-transform:uppercase;letter-spacing:.05em;">🏆 ' + (isMatch ? 'Résultat' : 'Vainqueur') + '</div>' +
       '<div style="font-family:\'Barlow Condensed\',sans-serif;font-weight:900;font-size:26px;color:#fff;text-transform:uppercase;margin-top:4px;">' + esc(winTxt || top.label) + '</div>' +
-      (isMatch ? '' : '<div style="font-size:14px;color:rgba(255,255,255,.9);font-weight:700;">' + top.total + ' coups · ' + (top.ecart >= 0 ? '+' : '') + top.ecart + ' / par</div>');
+      detail;
     body.appendChild(head);
   }
   // Toutes les cartes

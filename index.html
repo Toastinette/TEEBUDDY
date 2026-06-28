@@ -183,6 +183,12 @@
       </div>
     </div>
     <div id="g-unitbar" style="display:none;gap:8px;overflow-x:auto;padding:6px 20px 0;background:var(--bg);scrollbar-width:none;-webkit-overflow-scrolling:touch;"></div>
+    <div style="background:var(--bg);padding:6px 20px 0;display:flex;align-items:center;justify-content:center;gap:10px;">
+      <label style="font-family:'Barlow Condensed',sans-serif;font-weight:700;font-size:13px;color:var(--muted);text-transform:uppercase;letter-spacing:.05em;">Départ :</label>
+      <input id="g-depart" type="number" min="1" max="20" inputmode="numeric" placeholder="–" onchange="saveDepart()" style="width:54px;text-align:center;border:2px solid var(--border);border-radius:12px;padding:5px;font-family:'Barlow Condensed',sans-serif;font-weight:700;font-size:15px;background:#fff;">
+      <button id="g-df-btn" onclick="openDF()" title="Lancer un vote DF" style="background:#fff;border:2px solid var(--border);border-radius:20px;padding:5px 14px;font-family:'Barlow Condensed',sans-serif;font-weight:800;font-size:12px;color:var(--orange);cursor:pointer;-webkit-tap-highlight-color:transparent;letter-spacing:.05em;">DF ⛳</button>
+    </div>
+    <div id="g-vote" style="display:none;padding:8px 20px 0;"></div>
     <div style="background:var(--bg);padding:6px 0 8px;"><div class="holes-row" id="g-holes"></div></div>
     <div style="flex:1;display:flex;flex-direction:column;align-items:center;justify-content:center;padding:8px 24px;">
       <div class="L" style="margin-bottom:6px;">Trou <span id="g-hn">1</span> · Par <span id="g-par">4</span><span id="g-stroke" style="display:none;color:var(--green);margin-left:8px;"></span></div>
@@ -293,6 +299,16 @@
 
 </div><!-- #app -->
 <div id="toast"></div>
+
+<!-- Sélecteur DF : choisir un joueur de son départ -->
+<div id="df-picker" style="display:none;position:fixed;inset:0;z-index:9000;background:rgba(0,0,0,.5);align-items:flex-end;">
+  <div style="background:#fff;width:100%;border-radius:24px 24px 0 0;padding:24px 20px calc(24px + env(safe-area-inset-bottom));">
+    <div style="font-family:'Barlow Condensed',sans-serif;font-weight:900;font-size:20px;text-transform:uppercase;margin-bottom:4px;">Lancer un vote DF ⛳</div>
+    <div style="font-size:13px;color:var(--muted);margin-bottom:16px;">Qui dans ton départ a fait un DF ? Les autres voteront.</div>
+    <div id="df-picker-list" style="display:flex;flex-direction:column;gap:10px;margin-bottom:14px;"></div>
+    <button class="btn B-out" onclick="closeDFPicker()" style="width:100%;">Annuler</button>
+  </div>
+</div>
 
 <!-- Firebase compat (scripts classiques — fiables sur GitHub Pages) -->
 <script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-app-compat.js"></script>
