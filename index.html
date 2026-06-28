@@ -185,7 +185,7 @@
     <div id="g-unitbar" style="display:none;gap:8px;overflow-x:auto;padding:6px 20px 0;background:var(--bg);scrollbar-width:none;-webkit-overflow-scrolling:touch;"></div>
     <div style="background:var(--bg);padding:6px 0 8px;"><div class="holes-row" id="g-holes"></div></div>
     <div style="flex:1;display:flex;flex-direction:column;align-items:center;justify-content:center;padding:8px 24px;">
-      <div class="L" style="margin-bottom:6px;">Trou <span id="g-hn">1</span> · Par <span id="g-par">4</span></div>
+      <div class="L" style="margin-bottom:6px;">Trou <span id="g-hn">1</span> · Par <span id="g-par">4</span><span id="g-stroke" style="display:none;color:var(--green);margin-left:8px;"></span></div>
       <div id="g-slabel" style="font-family:'Barlow Condensed',sans-serif;font-weight:900;font-size:20px;text-transform:uppercase;letter-spacing:.1em;min-height:28px;margin-bottom:6px;text-align:center;"></div>
       <div style="display:flex;align-items:center;gap:24px;margin:6px 0;">
         <button class="btn" onclick="chScore(-1)" style="width:64px;height:64px;border-radius:50%;background:var(--bg);border:2.5px solid var(--border);font-size:34px;color:var(--text);flex-shrink:0;">−</button>
@@ -218,6 +218,12 @@
       <div style="display:flex;align-items:center;justify-content:center;gap:12px;margin-top:12px;">
         <span style="display:flex;align-items:center;"><span id="live-dot"></span><span style="font-family:'Barlow Condensed',sans-serif;font-weight:700;font-size:12px;color:rgba(255,255,255,.9);text-transform:uppercase;letter-spacing:.08em;" id="sc-info">—</span></span>
         <span class="viewer-count" id="sc-viewers" style="display:none;">👁 <span id="sc-viewers-n">0</span></span>
+      </div>
+      <div id="sc-net-wrap" style="display:none;margin-top:12px;justify-content:center;">
+        <div style="display:inline-flex;background:rgba(0,0,0,.18);border-radius:30px;padding:3px;">
+          <button id="sc-net-brut" onclick="setNetView(false)" class="net-toggle active">Brut</button>
+          <button id="sc-net-net" onclick="setNetView(true)" class="net-toggle">Net</button>
+        </div>
       </div>
     </div>
     <div style="padding:20px;display:flex;flex-direction:column;gap:14px;" id="sc-cards"></div>

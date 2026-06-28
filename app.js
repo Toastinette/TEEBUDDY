@@ -35,7 +35,8 @@ var S = {
   editable: [],       // unités de score modifiables sur ce téléphone (joueurs ou équipes)
   activeKey: null,    // clé de l'unité de score actuellement saisie
   local: {},          // copie locale des scores par clé d'unité { key: [18] }
-  writeTs: {}         // horodatage des dernières écritures (anti-écrasement)
+  writeTs: {},        // horodatage des dernières écritures (anti-écrasement)
+  netView: false      // affichage des cartes en net (coups rendus) au lieu de brut
 };
 var selCourse = (COURSES[0] && COURSES[0].id) || null;
 
@@ -196,6 +197,38 @@ function parPlayed(scores, pars) {
 }
 /* Conservé pour compat (somme des seuls chiffres) */
 function sumNums(arr) { return arr.reduce(function (a, b) { return a + (typeof b === 'number' ? b : 0); }, 0); }
+
+/* ── Handicap : coups rendus ───────────────────────────────────────────── */
+/* Handicap (difficulté 1-18) des trous de la partie, ou null si non renseigné */
+function gameHcp() {
+  return (S.game && S.game.courseHcp && S.game.courseHcp.length === 18) ? S.game.courseHcp : null;
+}
+/* Tableau (18) des coups rendus par trou pour un index donné.
+   Coups = index arrondi, répartis du trou le plus dur (hcp 1) au plus facile,
+   avec 2e tour si index > 18. */
+function strokesArray(index) {
+  var arr = Array(18).fill(0);
+  var hcp = gameHcp(); if (!hcp) return arr;
+  var recv = Math.max(0, Math.round(index || 0));
+  var base = Math.floor(recv / 18), r = recv % 18;
+  for (var i = 0; i < 18; i++) { arr[i] = base + (hcp[i] <= r ? 1 : 0); }
+  return arr;
+}
+/* Totaux d'une unité, en brut ou net */
+function unitTotals(scores, pars, strokes, croixV, net) {
+  var tot = 0, n = 0, parP = 0;
+  for (var i = 0; i < 18; i++) {
+    var v = scores[i]; if (v === null || v === undefined) continue;
+    n++; parP += pars[i];
+    var gross = holeVal(v, pars[i], croixV);
+    tot += net ? (gross - (strokes ? strokes[i] : 0)) : gross;
+  }
+  return { n: n, total: tot, ecart: n > 0 ? tot - parP : 9999 };
+}
+/* Le mode courant peut-il afficher le net ? (Stroke Play uniquement, hcp dispo) */
+function netAvailable() {
+  return S.game && S.game.mode === 'stroke' && !!gameHcp();
+}
 
 /* Match Play : différence de trous gagnés (positif = A mène) */
 function matchPlayDiff(aScores, bScores, pars) {
@@ -971,6 +1004,15 @@ function refreshGameUI() {
   updateGameHeader();
   var t = S.hole, par = S.game.coursePars[t], sc = getScores(S.activeKey)[t];
   txt('g-hn', t + 1); txt('g-par', par);
+  // Repère coup(s) rendu(s) pour le joueur actif (individuel, hcp dispo)
+  var gs = document.getElementById('g-stroke');
+  if (gs) {
+    var u = (S.editable || []).find(function (x) { return x.key === S.activeKey; });
+    var st = 0;
+    if (u && u.player && gameHcp()) { st = strokesArray(u.player.index)[t] || 0; }
+    if (st > 0) { gs.style.display = 'inline'; gs.textContent = '· ' + (st >= 2 ? st + ' coups rendus' : '1 coup rendu') + ' ⛳'; }
+    else gs.style.display = 'none';
+  }
   var sEl = document.getElementById('g-score'), lEl = document.getElementById('g-slabel'), eEl = document.getElementById('g-ecart');
   var crossBtn = document.getElementById('g-cross');
   if (sc === 'X') {
@@ -1093,13 +1135,24 @@ function buildScoreEntities() {
     var scores = (editable && S.local[u.key]) ? S.local[u.key] : getScores(u.key);
     var sub = u.type === 'team' ? 'Équipe' : ('Index ' + (u.player ? u.player.index : '—'));
     var hasHost = u.players.some(function (p) { return p.pid === S.game.host; });
-    return { label: u.label, sub: sub, p: u.p, scores: scores, key: u.key, editable: editable, me: editable, type: u.type, removable: isHostDevice && !hasHost };
+    return { label: u.label, sub: sub, p: u.p, scores: scores, key: u.key, editable: editable, me: editable, type: u.type, removable: isHostDevice && !hasHost, player: u.player };
   });
 
+  var cv = gCroixVal();
+  var useNet = S.netView && netAvailable();
   ents.forEach(function (en) {
-    en.n = countPlayed(en.scores);
-    en.total = totalStrokes(en.scores, pars, gCroixVal());
-    en.ecart = en.n > 0 ? en.total - parPlayed(en.scores, pars) : 9999;
+    // Coups rendus par trou (joueurs individuels uniquement)
+    en.strokes = (en.type === 'player' && en.player) ? strokesArray(en.player.index) : null;
+    en.hasNet = !!en.strokes;
+    var gross = unitTotals(en.scores, pars, null, cv, false);
+    var net = unitTotals(en.scores, pars, en.strokes, cv, true);
+    en.n = gross.n;
+    en.totalGross = gross.total; en.ecartGross = gross.ecart;
+    en.totalNet = net.total; en.ecartNet = net.ecart;
+    var showNet = useNet && en.hasNet;
+    en.total = showNet ? net.total : gross.total;
+    en.ecart = showNet ? net.ecart : gross.ecart;
+    en.showNet = showNet;
   });
 
   if (isMatch && ents.length === 2) {
@@ -1115,11 +1168,21 @@ function buildScoreEntities() {
   }
   return ents;
 }
+function setNetView(net) {
+  S.netView = net;
+  var b = document.getElementById('sc-net-brut'), n = document.getElementById('sc-net-net');
+  if (b) b.className = 'net-toggle' + (net ? '' : ' active');
+  if (n) n.className = 'net-toggle' + (net ? ' active' : '');
+  refreshScores();
+}
 function refreshScores() {
   var box = document.getElementById('sc-cards');
   if (!S.game) { box.innerHTML = '<div style="text-align:center;padding:40px;color:var(--muted);">Aucune partie en cours</div>'; return; }
   txt('sc-info', (S.game.name || S.game.courseName).toUpperCase() + ' · ' + MODES[S.game.mode].label.toUpperCase());
   document.getElementById('sc-spectator').style.display = S.spectating ? 'block' : 'none';
+  // Bouton Brut/Net : seulement en Stroke Play avec handicap renseigné
+  var nw = document.getElementById('sc-net-wrap');
+  if (nw) nw.style.display = netAvailable() ? 'flex' : 'none';
   box.innerHTML = '';
   var pars = S.game.coursePars;
   buildScoreEntities().forEach(function (en, rank) { box.appendChild(scoreCard(en, rank, pars)); });
@@ -1129,20 +1192,27 @@ function scoreCard(en, rank, pars) {
   var medals = ['🥇', '🥈', '🥉'];
   var isMatch = !!en.mp;
   var pos = isMatch ? (en._mpVal > 0 ? '👑' : (en._mpVal < 0 ? '' : '=')) : (en.n > 0 ? (rank < 3 ? medals[rank] : '#' + (rank + 1)) : '–');
-  function std(s, par) {
-    if (s === null || s === undefined) return '<td style="color:#ccc;font-size:12px;">·</td>';
-    if (s === 'X') return '<td style="color:var(--red);font-weight:900;">✕</td>';
-    var e = s - par, c = 'var(--text)', fw = '700';
+  var strokes = en.strokes || Array(18).fill(0);
+  var showNet = en.showNet;
+  function std(s, par, holeIdx) {
+    var st = strokes[holeIdx] || 0;
+    var dots = st > 0 ? '<span style="color:var(--green);font-size:8px;vertical-align:super;letter-spacing:-1px;">' + (st >= 2 ? '••' : '•') + '</span>' : '';
+    if (s === null || s === undefined) return '<td style="color:#ccc;font-size:12px;">·' + dots + '</td>';
+    if (s === 'X') return '<td style="color:var(--red);font-weight:900;">✕' + dots + '</td>';
+    var shown = showNet ? (s - st) : s;
+    var e = shown - par, c = 'var(--text)', fw = '700';
     if (e <= -2) c = 'var(--gold)'; else if (e === -1) { c = 'var(--green)'; fw = '900'; }
     else if (e === 1) c = 'var(--orange)'; else if (e >= 2) { c = 'var(--red)'; fw = '900'; }
-    return '<td style="color:' + c + ';font-weight:' + fw + ';">' + s + '</td>';
+    return '<td style="color:' + c + ';font-weight:' + fw + ';">' + shown + dots + '</td>';
   }
   var al = en.scores.slice(0, 9), ret = en.scores.slice(9, 18);
   var pAl = pars.slice(0, 9).reduce(function (a, b) { return a + b; }, 0), pRet = pars.slice(9, 18).reduce(function (a, b) { return a + b; }, 0);
   var cv = gCroixVal();
-  var tAl = totalStrokes(al, pars.slice(0, 9), cv), tRet = totalStrokes(ret, pars.slice(9, 18), cv);
+  var tAl = unitTotals(al, pars.slice(0, 9), strokes.slice(0, 9), cv, showNet).total;
+  var tRet = unitTotals(ret, pars.slice(9, 18), strokes.slice(9, 18), cv, showNet).total;
   var ecTxt = en.n > 0 ? ((en.ecart >= 0 ? '+' : '') + en.ecart) : '';
   var ecCol = en.ecart <= 0 ? 'var(--green)' : 'var(--red)';
+  var netTag = showNet ? ' <span style="font-size:10px;color:var(--green);">NET</span>' : '';
 
   // Bloc de droite : Match Play (UP/DOWN) ou total classique
   var rightBlock;
@@ -1151,7 +1221,7 @@ function scoreCard(en, rank, pars) {
     rightBlock = '<div style="font-family:\'Barlow Condensed\',sans-serif;font-weight:900;font-size:24px;color:' + mpCol + ';">' + en.mp + '</div>' +
                  '<div style="font-size:11px;color:var(--muted);">' + (en.n > 0 ? en.total + ' coups' : 'en attente') + '</div>';
   } else {
-    rightBlock = '<div style="font-family:\'Barlow Condensed\',sans-serif;font-weight:900;font-size:30px;">' + (en.n > 0 ? en.total : '—') + '</div>' +
+    rightBlock = '<div style="font-family:\'Barlow Condensed\',sans-serif;font-weight:900;font-size:30px;">' + (en.n > 0 ? en.total : '—') + netTag + '</div>' +
                  (en.n > 0 ? '<div style="font-size:12px;color:' + ecCol + ';font-weight:700;">' + ecTxt + ' / par</div>' : '<div style="font-size:11px;color:var(--muted);">en attente</div>');
   }
 
@@ -1177,11 +1247,11 @@ function scoreCard(en, rank, pars) {
     '<div style="overflow-x:auto;-webkit-overflow-scrolling:touch;"><table class="st" style="min-width:100%;">' +
       '<tr><th></th>' + [1, 2, 3, 4, 5, 6, 7, 8, 9].map(function (n) { return '<th>' + n + '</th>'; }).join('') + '<th class="tot">Al.</th></tr>' +
       '<tr><td style="font-size:10px;color:var(--muted);">Par</td>' + pars.slice(0, 9).map(function (p) { return '<td style="font-size:10px;color:var(--muted);">' + p + '</td>'; }).join('') + '<td class="tot" style="font-size:10px;color:var(--muted);">' + pAl + '</td></tr>' +
-      '<tr><td></td>' + al.map(function (s, i) { return std(s, pars[i]); }).join('') + '<td class="tot">' + (tAl || '—') + '</td></tr>' +
+      '<tr><td></td>' + al.map(function (s, i) { return std(s, pars[i], i); }).join('') + '<td class="tot">' + (tAl || '—') + '</td></tr>' +
       '<tr><td colspan="11" style="height:6px;"></td></tr>' +
       '<tr><th></th>' + [10, 11, 12, 13, 14, 15, 16, 17, 18].map(function (n) { return '<th>' + n + '</th>'; }).join('') + '<th class="tot">Ret.</th></tr>' +
       '<tr><td style="font-size:10px;color:var(--muted);">Par</td>' + pars.slice(9, 18).map(function (p) { return '<td style="font-size:10px;color:var(--muted);">' + p + '</td>'; }).join('') + '<td class="tot" style="font-size:10px;color:var(--muted);">' + pRet + '</td></tr>' +
-      '<tr><td></td>' + ret.map(function (s, i) { return std(s, pars[9 + i]); }).join('') + '<td class="tot">' + (tRet || '—') + '</td></tr>' +
+      '<tr><td></td>' + ret.map(function (s, i) { return std(s, pars[9 + i], 9 + i); }).join('') + '<td class="tot">' + (tRet || '—') + '</td></tr>' +
     '</table></div>';
   if (en.removable) {
     var kb = card.querySelector('.kick-card');

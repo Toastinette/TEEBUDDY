@@ -214,6 +214,16 @@ body {
   color: rgba(255,255,255,.9);
 }
 
+/* ── Bascule Brut / Net ─────────────────────────────────────────────────── */
+.net-toggle {
+  border: none; background: transparent; color: rgba(255,255,255,.8);
+  font-family: 'Barlow Condensed', sans-serif; font-weight: 800; font-size: 13px;
+  text-transform: uppercase; letter-spacing: .05em;
+  padding: 6px 18px; border-radius: 30px; cursor: pointer;
+  -webkit-tap-highlight-color: transparent; transition: all .15s;
+}
+.net-toggle.active { background: #fff; color: var(--green); }
+
 /* ── Bouton œil (spectateur) sur carte de partie ───────────────────────── */
 .eye-btn {
   width: 40px; height: 40px; border-radius: 50%;
