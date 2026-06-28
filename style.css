@@ -238,3 +238,26 @@ body {
 
 /* Bouton croix actif */
 #g-cross.active { background: var(--red) !important; color: #fff !important; border-color: var(--red) !important; }
+
+/* ── Cartouches d'équipe (drag & drop salon) ───────────────────────────── */
+.player-cartouche {
+  display: flex; align-items: center; gap: 8px;
+  background: #fff; border: 2px solid var(--border); border-radius: 30px;
+  padding: 7px 14px 7px 7px;
+  box-shadow: 0 1px 6px rgba(0,0,0,.06);
+  user-select: none; -webkit-user-select: none; touch-action: none;
+}
+.player-cartouche.draggable { cursor: grab; }
+.player-cartouche.draggable:active { cursor: grabbing; }
+.player-cartouche.drop-target { border-color: var(--green); background: rgba(46,204,113,.12); transform: scale(1.05); }
+.team-cartouche {
+  display: flex; align-items: center; gap: 10px;
+  background: var(--green); border-radius: 16px; padding: 8px 10px 8px 12px;
+  box-shadow: 0 2px 10px rgba(46,204,113,.3);
+}
+.team-cartouche .split-btn {
+  width: 26px; height: 26px; border-radius: 50%;
+  background: rgba(255,255,255,.25); border: none; color: #fff;
+  font-size: 18px; line-height: 1; cursor: pointer; flex-shrink: 0;
+  -webkit-tap-highlight-color: transparent;
+}

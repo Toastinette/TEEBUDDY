@@ -80,7 +80,7 @@ function boot() {
   buildCourseList();
   renderPlayerList();
   renderHomeParties();
-  if (FB_OK) { attachOpenGamesListener(); loadCoursesFromDB(); }
+  if (FB_OK) { attachOpenGamesListener(); loadCoursesFromDB(); loadAppSettings(); }
   // Rafraîchit l'affichage des compteurs de spectateurs (retire les inactifs)
   setInterval(function () { if (S.game) updateViewerDisplays(); }, 15000);
 }
@@ -176,7 +176,10 @@ function isDecided(v) { return typeof v === 'number' || v === 'X'; }
 function countPlayed(arr) { return arr.filter(function (s) { return s !== null && s !== undefined; }).length; }
 
 /* Valeur de croix de la partie (par + cette valeur en Stroke Play) */
-function gCroixVal() { return (S.game && typeof S.game.croixValue === 'number') ? S.game.croixValue : 4; }
+/* Valeur de croix : réglage GLOBAL de l'app (modifiable dans l'admin),
+   chargé au démarrage. Par défaut 4. */
+var APP_CROIX = 4;
+function gCroixVal() { return (typeof APP_CROIX === 'number') ? APP_CROIX : 4; }
 /* Valeur en coups d'un trou : chiffre, ou par+croix si croix, ou null si pas joué */
 function holeVal(v, par, croixV) {
   if (typeof v === 'number') return v;
@@ -210,6 +213,20 @@ function matchPlayDiff(aScores, bScores, pars) {
 function mpLabel(diff) {
   if (diff === 0) return 'ALL SQUARE';
   return Math.abs(diff) + (diff > 0 ? ' UP' : ' DOWN');
+}
+
+/* Charge les réglages généraux (valeur de croix) et écoute les changements */
+function loadAppSettings() {
+  DB.collection('settings').doc('general').onSnapshot(function (snap) {
+    if (snap.exists) {
+      var s = snap.data();
+      if (typeof s.croixValue === 'number') {
+        APP_CROIX = s.croixValue;
+        if (isActive('s-scores')) refreshScores();
+        if (isActive('s-game')) refreshGameUI();
+      }
+    }
+  }, function (e) { console.error('settings', e); });
 }
 
 /* Charge les parcours depuis Firestore (gérés via la page admin).
@@ -641,7 +658,7 @@ function renderSalon() {
     if (note) note.textContent = MODES[g.mode].matchplay
       ? 'Match Play : laisse vide pour du 1 contre 1, ou forme 2 équipes pour du 2 contre 2.'
       : 'Forme les équipes de 2.';
-    renderTeams('sl-equipes');
+    renderTeams('sl-equipes', isHost);
     document.getElementById('sl-shuffle').style.display = isHost ? 'block' : 'none';
   } else ew.style.display = 'none';
 
@@ -669,62 +686,196 @@ function renderModeButtons(containerId, editable) {
     wrap.appendChild(b);
   });
 }
-function renderTeams(containerId) {
-  var el = document.getElementById(containerId); if (!el) return; el.innerHTML = '';
+/* Zone d'équipes interactive : cartouches joueurs (libres) + équipes formées.
+   interactive = true → l'hôte peut glisser pour fusionner et séparer (×). */
+function renderTeams(containerId, interactive) {
+  var el = document.getElementById(containerId); if (!el) return;
   var teams = S.game.teams || [];
-  if (teams.length === 0) {
-    el.innerHTML = '<div style="padding:14px;text-align:center;color:var(--muted);font-size:13px;">Appuie sur « Former les équipes » pour répartir les joueurs.</div>';
-    return;
-  }
+  var inTeam = {};
+  teams.forEach(function (t) { t.players.forEach(function (p) { if (p) inTeam[p.pid] = true; }); });
+  var free = (S.game.players || []).filter(function (p) { return !inTeam[p.pid]; });
+
+  el.innerHTML = '';
+  el.style.cssText = 'display:flex;flex-wrap:wrap;gap:10px;';
+
   teams.forEach(function (t, i) {
-    var d = document.createElement('div'); d.className = 'card';
-    d.style.cssText = 'display:flex;align-items:center;gap:12px;';
-    var n0 = t.players[0] ? t.players[0].prenom : '?';
-    var n1 = t.players[1] ? t.players[1].prenom : '?';
-    var ix = ((t.players[0] ? t.players[0].index : 0) + (t.players[1] ? t.players[1].index : 0)).toFixed(1);
-    d.innerHTML = '<div style="font-family:\'Barlow Condensed\',sans-serif;font-weight:900;font-size:22px;color:var(--green);min-width:32px;">' + (i + 1) + '</div>' +
-      '<div style="flex:1;"><div style="font-family:\'Barlow Condensed\',sans-serif;font-weight:800;font-size:16px;text-transform:uppercase;">' + n0 + ' &amp; ' + n1 + '</div>' +
-      '<div style="font-size:12px;color:var(--muted);">Index cumulé : ' + ix + '</div></div>';
+    var p0 = t.players[0], p1 = t.players[1];
+    var ix = ((p0 ? p0.index : 0) + (p1 ? p1.index : 0)).toFixed(1);
+    var d = document.createElement('div');
+    d.className = 'team-cartouche';
+    d.innerHTML =
+      '<div style="display:flex;align-items:center;gap:6px;">' +
+        avatarHTML(p0, 26, 'var(--green)') + avatarHTML(p1, 26, 'var(--green)') +
+        '<div style="margin-left:2px;"><div style="font-family:\'Barlow Condensed\',sans-serif;font-weight:800;font-size:14px;text-transform:uppercase;color:#fff;line-height:1;">' + esc(p0 ? p0.prenom : '?') + ' &amp; ' + esc(p1 ? p1.prenom : '?') + '</div>' +
+        '<div style="font-size:10px;color:rgba(255,255,255,.8);">Idx ' + ix + '</div></div>' +
+      '</div>' +
+      (interactive ? '<button class="split-btn" data-tid="' + t.id + '" title="Séparer">×</button>' : '');
     el.appendChild(d);
   });
+
+  free.forEach(function (p) {
+    var d = document.createElement('div');
+    d.className = 'player-cartouche' + (interactive ? ' draggable' : '');
+    d.setAttribute('data-pid', p.pid);
+    d.innerHTML = avatarHTML(p, 28, 'var(--green)') +
+      '<span style="font-family:\'Barlow Condensed\',sans-serif;font-weight:700;font-size:14px;text-transform:uppercase;">' + esc(p.prenom) + '</span>';
+    el.appendChild(d);
+  });
+
+  if (interactive) {
+    el.querySelectorAll('.split-btn').forEach(function (b) {
+      b.onclick = function () { splitTeam(b.getAttribute('data-tid')); };
+    });
+    attachDragHandlers(el);
+    if (free.length > 1) {
+      var hint = document.createElement('div');
+      hint.style.cssText = 'width:100%;font-size:12px;color:var(--muted);margin-top:2px;';
+      hint.textContent = '👆 Glisse un joueur sur un autre pour former une équipe.';
+      el.appendChild(hint);
+    }
+  }
 }
+
+/* ── Drag & drop tactile pour former les équipes ───────────────────────── */
+var DRAG = { active: false, srcPid: null, ghost: null, container: null, srcEl: null };
+function attachDragHandlers(container) {
+  DRAG.container = container;
+  container.querySelectorAll('.player-cartouche.draggable').forEach(function (el) {
+    el.addEventListener('touchstart', function (e) { startDrag(e, el, true); }, { passive: false });
+    el.addEventListener('mousedown', function (e) { startDrag(e, el, false); });
+  });
+}
+function dragPoint(e, touch) {
+  if (touch) { var t = e.touches[0] || e.changedTouches[0]; return { x: t.clientX, y: t.clientY }; }
+  return { x: e.clientX, y: e.clientY };
+}
+function startDrag(e, el, touch) {
+  if (DRAG.active) return;
+  e.preventDefault();
+  DRAG.active = true; DRAG.srcPid = el.getAttribute('data-pid'); DRAG.srcEl = el;
+  var p = dragPoint(e, touch);
+  DRAG.ghost = el.cloneNode(true);
+  DRAG.ghost.style.cssText = 'position:fixed;z-index:99999;pointer-events:none;opacity:.92;box-shadow:0 8px 24px rgba(0,0,0,.25);';
+  document.body.appendChild(DRAG.ghost);
+  moveGhost(p);
+  el.style.opacity = '.3';
+  var moveH = function (ev) { if (!DRAG.active) return; ev.preventDefault(); var pp = dragPoint(ev, touch); moveGhost(pp); highlightTarget(pp); };
+  var endH = function (ev) {
+    var pp = dragPoint(ev, touch); endDrag(pp);
+    if (touch) { document.removeEventListener('touchmove', moveH); document.removeEventListener('touchend', endH); document.removeEventListener('touchcancel', endH); }
+    else { document.removeEventListener('mousemove', moveH); document.removeEventListener('mouseup', endH); }
+  };
+  if (touch) { document.addEventListener('touchmove', moveH, { passive: false }); document.addEventListener('touchend', endH); document.addEventListener('touchcancel', endH); }
+  else { document.addEventListener('mousemove', moveH); document.addEventListener('mouseup', endH); }
+}
+function moveGhost(p) { if (DRAG.ghost) { DRAG.ghost.style.left = (p.x - 50) + 'px'; DRAG.ghost.style.top = (p.y - 22) + 'px'; } }
+function dragTargetAt(p) {
+  if (DRAG.ghost) DRAG.ghost.style.display = 'none';
+  var el = document.elementFromPoint(p.x, p.y);
+  if (DRAG.ghost) DRAG.ghost.style.display = '';
+  while (el && !(el.classList && el.classList.contains('player-cartouche'))) el = el.parentElement;
+  if (el && el.getAttribute('data-pid') && el.getAttribute('data-pid') !== DRAG.srcPid) return el;
+  return null;
+}
+function highlightTarget(p) {
+  if (DRAG.container) DRAG.container.querySelectorAll('.player-cartouche').forEach(function (c) { c.classList.remove('drop-target'); });
+  var t = dragTargetAt(p); if (t) t.classList.add('drop-target');
+}
+function endDrag(p) {
+  var t = dragTargetAt(p);
+  if (DRAG.ghost) { DRAG.ghost.remove(); DRAG.ghost = null; }
+  if (DRAG.srcEl) DRAG.srcEl.style.opacity = '';
+  if (DRAG.container) DRAG.container.querySelectorAll('.player-cartouche').forEach(function (c) { c.classList.remove('drop-target'); });
+  var src = DRAG.srcPid; DRAG.active = false; DRAG.srcPid = null; DRAG.srcEl = null;
+  if (t) mergePlayers(src, t.getAttribute('data-pid'));
+}
+function mergePlayers(aPid, bPid) {
+  if (!FB_OK || !S.game) return;
+  if (S.game.host !== S.player.pid) { toast('Seul l\'hôte forme les équipes'); return; }
+  var pa = S.game.players.find(function (p) { return p.pid === aPid; });
+  var pb = S.game.players.find(function (p) { return p.pid === bPid; });
+  if (!pa || !pb) return;
+  var teams = (S.game.teams || []).slice();
+  teams.push({ id: 'tm_' + Date.now() + '_' + Math.random().toString(36).slice(2, 5), players: [pa, pb] });
+  DB.collection('games').doc(S.gameId).update({ teams: teams, updatedAt: firebase.firestore.FieldValue.serverTimestamp() })
+    .then(function () { toast('Équipe formée 🤝', true); });
+}
+function splitTeam(tid) {
+  if (!FB_OK || !S.game || S.game.host !== S.player.pid) return;
+  var teams = (S.game.teams || []).filter(function (t) { return t.id !== tid; });
+  DB.collection('games').doc(S.gameId).update({ teams: teams, updatedAt: firebase.firestore.FieldValue.serverTimestamp() })
+    .then(function () { toast('Équipe séparée', true); });
+}
+function freePlayers() {
+  var inTeam = {};
+  (S.game.teams || []).forEach(function (t) { t.players.forEach(function (p) { if (p) inTeam[p.pid] = true; }); });
+  return (S.game.players || []).filter(function (p) { return !inTeam[p.pid]; });
+}
+
 function changeMode(m) {
   if (!FB_OK || !S.game) return;
   if (S.game.host !== S.player.pid) { toast('Seul l\'hôte peut changer le mode'); return; }
-  var upd = { mode: m, updatedAt: firebase.firestore.FieldValue.serverTimestamp() };
-  // Scramble/MMB : équipes auto. Match Play : on laisse l'hôte choisir (1v1 ou 2v2). Autres : pas d'équipes.
-  if (MODES[m].teams) upd.teams = autoTeams(S.game.players);
-  else if (!MODES[m].matchplay) upd.teams = [];
+  // Changement de mode : on repart de joueurs libres (à répartir à la main ou via le bouton équilibrer)
+  var upd = { mode: m, teams: [], updatedAt: firebase.firestore.FieldValue.serverTimestamp() };
   DB.collection('games').doc(S.gameId).update(upd);
 }
+/* Répartition équilibrée : on appaire le meilleur index avec le moins bon,
+   etc., pour que les index cumulés des équipes soient le plus proches possible. */
 function autoTeams(players) {
-  var sh = (players || []).slice().sort(function () { return Math.random() - .5; });
-  var teams = [];
-  for (var i = 0; i < sh.length; i += 2) {
-    teams.push({ id: 'tm_' + Date.now() + '_' + (i / 2) + '_' + Math.random().toString(36).slice(2, 5), players: [sh[i], sh[i + 1] || null] });
+  var sorted = (players || []).slice().sort(function (a, b) { return (a.index || 0) - (b.index || 0); });
+  var teams = [], i = 0, j = sorted.length - 1, n = 0;
+  while (i < j) {
+    teams.push({ id: 'tm_' + Date.now() + '_' + (n++) + '_' + Math.random().toString(36).slice(2, 5), players: [sorted[i], sorted[j]] });
+    i++; j--;
+  }
+  if (i === j) { // joueur impair seul
+    teams.push({ id: 'tm_' + Date.now() + '_' + (n++) + '_' + Math.random().toString(36).slice(2, 5), players: [sorted[i], null] });
   }
   return teams;
 }
-/* L'hôte retire un joueur de la partie */
-function kickPlayer(pid, prenom) {
+/* L'hôte retire un ou plusieurs joueurs (et les clés de score associées) */
+function kickPids(pids, extraScoreKeys, label) {
   if (!FB_OK || !S.game) return;
   if (S.game.host !== S.player.pid) { toast('Seul l\'hôte peut retirer un joueur'); return; }
-  if (!confirm('Retirer ' + prenom + ' de la partie ?')) return;
-  var remaining = (S.game.players || []).filter(function (p) { return p.pid !== pid; });
-  var ns = Object.assign({}, S.game.scores); delete ns[pid];
+  var remaining = (S.game.players || []).filter(function (p) { return pids.indexOf(p.pid) < 0; });
+  if (remaining.length === 0) {
+    if (!confirm('Cela retirerait le dernier joueur et supprimera la partie. Continuer ?')) return;
+    DB.collection('games').doc(S.gameId).delete();
+    return;
+  }
+  var ns = Object.assign({}, S.game.scores);
+  pids.forEach(function (pid) { delete ns[pid]; });
+  (extraScoreKeys || []).forEach(function (k) { delete ns[k]; });
+  var newHost = S.game.host;
+  if (pids.indexOf(S.game.host) >= 0) newHost = remaining[0].pid;
   var teams = (S.game.teams || []).map(function (t) {
-    return { id: t.id, players: t.players.filter(function (pp) { return pp && pp.pid !== pid; }) };
+    return { id: t.id, players: t.players.filter(function (pp) { return pp && pids.indexOf(pp.pid) < 0; }) };
   }).filter(function (t) { return t.players.length > 0; });
   DB.collection('games').doc(S.gameId).update({
-    players: remaining, scores: ns, teams: teams,
+    players: remaining, scores: ns, host: newHost, teams: teams,
     updatedAt: firebase.firestore.FieldValue.serverTimestamp()
-  }).then(function () { toast(prenom + ' a été retiré', true); }).catch(function (e) { console.error(e); });
+  }).then(function () { toast((label || 'Joueur') + ' retiré', true); }).catch(function (e) { console.error(e); });
+}
+/* L'hôte retire un joueur (depuis le salon) */
+function kickPlayer(pid, prenom) {
+  if (!confirm('Retirer ' + prenom + ' de la partie ?')) return;
+  kickPids([pid], [pid], prenom);
+}
+/* L'hôte retire une unité (joueur ou équipe) depuis les cartes de score */
+function removeEntity(key) {
+  if (!S.game || S.game.host !== S.player.pid) return;
+  var u = scoringUnits(S.game).find(function (x) { return x.key === key; });
+  if (!u) return;
+  var pids = u.players.map(function (p) { return p.pid; });
+  if (pids.indexOf(S.player.pid) >= 0) { toast('Tu ne peux pas te retirer ici'); return; }
+  if (!confirm((u.type === 'team' ? 'Retirer l\'équipe ' : 'Retirer ') + u.label + ' de la partie ?')) return;
+  kickPids(pids, [u.key], u.label);
 }
 
 function shuffleTeams() {
   if (!FB_OK || S.game.host !== S.player.pid) return;
   DB.collection('games').doc(S.gameId).update({ teams: autoTeams(S.game.players) }).then(function () {
-    toast('Équipes mélangées 🔀', true);
+    toast('Équipes équilibrées ⚖️', true);
   });
 }
 function launchGame() {
@@ -732,13 +883,17 @@ function launchGame() {
   if (S.game.host !== S.player.pid) { toast('Seul l\'hôte peut lancer'); return; }
   var mode = MODES[S.game.mode] || {};
   if (mode.matchplay) {
-    var sides = scoringUnits(S.game).length;
-    if (sides !== 2) { toast('Match Play : exactement 2 joueurs (1v1) ou 2 équipes (2v2)'); return; }
+    if (teamBased(S.game)) {
+      if (freePlayers().length > 0) { toast('Glisse chaque joueur dans une équipe'); return; }
+      if ((S.game.teams || []).length !== 2) { toast('Match Play 2v2 : exactement 2 équipes'); return; }
+    } else {
+      if ((S.game.players || []).length !== 2) { toast('Match Play : 2 joueurs (1v1), ou forme 2 équipes (2v2)'); return; }
+    }
   } else if (mode.teams) {
     var n = (S.game.players || []).length;
     if (n < 2) { toast('Ajoute au moins 2 joueurs'); return; }
-    if (n % 2) { toast('Nombre pair de joueurs requis'); return; }
-    if (!S.game.teams || S.game.teams.length === 0) { toast('Forme les équipes d\'abord 🔀'); return; }
+    if (freePlayers().length > 0) { toast('Glisse chaque joueur dans une équipe 🤝'); return; }
+    if (!S.game.teams || S.game.teams.length === 0) { toast('Forme les équipes d\'abord'); return; }
   }
   DB.collection('games').doc(S.gameId).update({ status: 'playing', updatedAt: firebase.firestore.FieldValue.serverTimestamp() });
 }
@@ -753,7 +908,7 @@ function renderSettings() {
   if (isHost) {
     renderModeButtons('set-mode-buttons', true);
     var ew = document.getElementById('set-equipes-wrap');
-    if (MODES[g.mode].teams || MODES[g.mode].matchplay) { ew.style.display = 'block'; renderTeams('set-equipes'); }
+    if (MODES[g.mode].teams || MODES[g.mode].matchplay) { ew.style.display = 'block'; renderTeams('set-equipes', isHost); }
     else ew.style.display = 'none';
   }
 }
@@ -931,12 +1086,14 @@ function buildScoreEntities() {
   var pars = S.game.coursePars;
   var units = scoringUnits(S.game);
   var isMatch = (MODES[S.game.mode] || {}).matchplay;
+  var isHostDevice = !S.spectating && S.game.host === S.player.pid;
 
   var ents = units.map(function (u) {
     var editable = u.players.some(function (p) { return S.myPids.indexOf(p.pid) >= 0; }) && !S.spectating;
     var scores = (editable && S.local[u.key]) ? S.local[u.key] : getScores(u.key);
     var sub = u.type === 'team' ? 'Équipe' : ('Index ' + (u.player ? u.player.index : '—'));
-    return { label: u.label, sub: sub, p: u.p, scores: scores, key: u.key, editable: editable, me: editable, type: u.type };
+    var hasHost = u.players.some(function (p) { return p.pid === S.game.host; });
+    return { label: u.label, sub: sub, p: u.p, scores: scores, key: u.key, editable: editable, me: editable, type: u.type, removable: isHostDevice && !hasHost };
   });
 
   ents.forEach(function (en) {
@@ -1004,15 +1161,18 @@ function scoreCard(en, rank, pars) {
     card.style.cursor = 'pointer';
     card.onclick = function () { setActiveEntity(en.key); go('s-game'); };
   }
+  var removeBtn = en.removable
+    ? '<button class="kick-card" title="Retirer" style="background:#FFF0F0;border:none;color:var(--red);width:30px;height:30px;border-radius:50%;font-size:18px;line-height:1;cursor:pointer;flex-shrink:0;-webkit-tap-highlight-color:transparent;">×</button>'
+    : '';
   card.innerHTML =
-    '<div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:14px;">' +
+    '<div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:14px;gap:8px;">' +
       '<div style="display:flex;align-items:center;gap:10px;min-width:0;">' +
         '<div style="font-family:\'Barlow Condensed\',sans-serif;font-weight:900;font-size:18px;min-width:24px;text-align:center;">' + pos + '</div>' +
         avatarHTML(en.p, 34, en.me ? 'var(--green)' : 'var(--bg)', en.me ? '#fff' : 'var(--text)') +
         '<div style="min-width:0;"><div style="font-family:\'Barlow Condensed\',sans-serif;font-weight:800;font-size:16px;text-transform:uppercase;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">' + esc(en.label) + (en.editable ? ' <span style="font-size:10px;color:var(--green);">✎</span>' : '') + '</div>' +
         '<div style="font-size:11px;color:var(--muted);">' + esc(en.sub) + '</div></div>' +
       '</div>' +
-      '<div style="text-align:right;flex-shrink:0;">' + rightBlock + '</div>' +
+      '<div style="display:flex;align-items:center;gap:8px;flex-shrink:0;"><div style="text-align:right;">' + rightBlock + '</div>' + removeBtn + '</div>' +
     '</div>' +
     '<div style="overflow-x:auto;-webkit-overflow-scrolling:touch;"><table class="st" style="min-width:100%;">' +
       '<tr><th></th>' + [1, 2, 3, 4, 5, 6, 7, 8, 9].map(function (n) { return '<th>' + n + '</th>'; }).join('') + '<th class="tot">Al.</th></tr>' +
@@ -1023,6 +1183,10 @@ function scoreCard(en, rank, pars) {
       '<tr><td style="font-size:10px;color:var(--muted);">Par</td>' + pars.slice(9, 18).map(function (p) { return '<td style="font-size:10px;color:var(--muted);">' + p + '</td>'; }).join('') + '<td class="tot" style="font-size:10px;color:var(--muted);">' + pRet + '</td></tr>' +
       '<tr><td></td>' + ret.map(function (s, i) { return std(s, pars[9 + i]); }).join('') + '<td class="tot">' + (tRet || '—') + '</td></tr>' +
     '</table></div>';
+  if (en.removable) {
+    var kb = card.querySelector('.kick-card');
+    if (kb) kb.onclick = function (ev) { ev.stopPropagation(); removeEntity(en.key); };
+  }
   return card;
 }
 
