@@ -16,10 +16,16 @@ try {
 /* Raccourcis vers la config */
 var COURSES = window.COURSES || [];
 var MODES   = window.MODES || {};
+var TEE_COLORS = {
+  blanc: { label: 'Blanc' },
+  jaune: { label: 'Jaune' },
+  bleu:  { label: 'Bleu' },
+  rouge: { label: 'Rouge' }
+};
 
 /* ── État global ────────────────────────────────────────────────────────── */
 var S = {
-  player: null,       // { prenom, nom, index, pid, avatar? }
+  player: null,       // { prenom, nom, index, teeColor, pid, avatar? }
   game:   null,       // document Firestore de la partie
   gameId: null,       // identifiant du document (code court)
   hole:   0,
@@ -203,13 +209,41 @@ function sumNums(arr) { return arr.reduce(function (a, b) { return a + (typeof b
 function gameHcp() {
   return (S.game && S.game.courseHcp && S.game.courseHcp.length === 18) ? S.game.courseHcp : null;
 }
+function validTeeColor(c) {
+  return TEE_COLORS[c] ? c : 'jaune';
+}
+function teeLabel(c) {
+  c = validTeeColor(c);
+  return TEE_COLORS[c].label;
+}
+function selectTeeColor(prefix, color) {
+  color = validTeeColor(color);
+  Object.keys(TEE_COLORS).forEach(function (c) {
+    var el = document.getElementById(prefix + '-tee-' + c);
+    if (el) el.classList.toggle('active', c === color);
+  });
+  var hidden = document.getElementById(prefix + '-tee');
+  if (hidden) hidden.value = color;
+}
+function courseHandicap(index, player) {
+  var ix = parseFloat(index) || 0;
+  var color = validTeeColor(player && player.teeColor);
+  var ratings = S.game && S.game.teeRatings ? S.game.teeRatings[color] : null;
+  var slope = ratings && parseFloat(ratings.slope);
+  var cr = ratings && parseFloat(ratings.courseRating || ratings.rating || ratings.cr);
+  var par = ratings && parseFloat(ratings.par || S.game.parTotal);
+  if (isFinite(slope) && isFinite(cr) && isFinite(par) && slope > 0) {
+    return Math.max(0, Math.round(ix * slope / 113 + (cr - par)));
+  }
+  return Math.max(0, Math.round(ix));
+}
 /* Tableau (18) des coups rendus par trou pour un index donné.
-   Coups = index arrondi, répartis du trou le plus dur (hcp 1) au plus facile,
-   avec 2e tour si index > 18. */
-function strokesArray(index) {
+   Coups = handicap de parcours, réparti du trou le plus dur (hcp 1) au plus facile,
+   avec 2e tour si le joueur reçoit plus de 18 coups. */
+function strokesArray(index, player) {
   var arr = Array(18).fill(0);
   var hcp = gameHcp(); if (!hcp) return arr;
-  var recv = Math.max(0, Math.round(index || 0));
+  var recv = courseHandicap(index, player);
   var base = Math.floor(recv / 18), r = recv % 18;
   for (var i = 0; i < 18; i++) { arr[i] = base + (hcp[i] <= r ? 1 : 0); }
   return arr;
@@ -377,8 +411,9 @@ function setAvatar(id, p, bg) {
 /* ── Onboarding ─────────────────────────────────────────────────────────── */
 function saveOnboard() {
   var pr = trim('ob-prenom'), no = trim('ob-nom'), ix = parseFloat(val('ob-index')) || 0;
+  var tee = validTeeColor(val('ob-tee') || 'jaune');
   if (!pr) { toast('Entre ton prénom 👋'); return; }
-  S.player = { prenom: pr, nom: no, index: ix, pid: 'p_' + Date.now() + '_' + Math.random().toString(36).slice(2, 6) };
+  S.player = { prenom: pr, nom: no, index: ix, teeColor: tee, pid: 'p_' + Date.now() + '_' + Math.random().toString(36).slice(2, 6) };
   lset('tb_player', S.player); updatePlayerUI();
   toast('Bienvenue ' + pr + ' ! ⛳', true);
   setTimeout(function () { go('s-home'); }, 600);
@@ -390,19 +425,36 @@ function fillProfilForm() {
   setv('pf-prenom', S.player.prenom || '');
   setv('pf-nom', S.player.nom || '');
   setv('pf-index', S.player.index || '');
+  selectTeeColor('pf', S.player.teeColor || 'jaune');
   setAvatar('pf-av', S.player, 'var(--green)');
   txt('pf-name', fullname(S.player));
-  txt('pf-idx', S.player.index || '—');
+  txt('pf-idx', (S.player.index || '—') + ' · ' + teeLabel(S.player.teeColor));
   var rm = document.getElementById('pf-remove-av');
   if (rm) rm.style.display = S.player.avatar ? 'block' : 'none';
 }
 function saveProfil() {
   var pr = trim('pf-prenom'), no = trim('pf-nom'), ix = parseFloat(val('pf-index')) || 0;
+  var tee = validTeeColor(val('pf-tee') || 'jaune');
   if (!pr) { toast('Entre ton prénom'); return; }
-  S.player = Object.assign({}, S.player, { prenom: pr, nom: no, index: ix });
+  S.player = Object.assign({}, S.player, { prenom: pr, nom: no, index: ix, teeColor: tee });
   lset('tb_player', S.player); updatePlayerUI(); fillProfilForm();
+  syncPlayerProfileToGame();
   toast('Profil mis à jour ✓', true);
   setTimeout(back, 700);
+}
+function syncPlayerProfileToGame() {
+  if (!FB_OK || !S.game || !S.player || !S.gameId) return;
+  var changed = false;
+  var players = (S.game.players || []).map(function (p) {
+    if (p.pid !== S.player.pid) return p;
+    changed = true;
+    var np = Object.assign({}, p, { prenom: S.player.prenom, nom: S.player.nom || '', index: S.player.index, teeColor: validTeeColor(S.player.teeColor) });
+    if (S.player.avatar) np.avatar = S.player.avatar;
+    else delete np.avatar;
+    return np;
+  });
+  if (!changed) return;
+  DB.collection('games').doc(S.gameId).update({ players: players, updatedAt: firebase.firestore.FieldValue.serverTimestamp() });
 }
 function updatePlayerUI() {
   if (!S.player) return;
@@ -433,7 +485,7 @@ function hideAddPlayer() { document.getElementById('form-add').style.display = '
 function addPlayer() {
   var pr = trim('add-prenom'), ix = parseFloat(val('add-index')) || 0;
   if (!pr) { toast('Entre un prénom'); return; }
-  S.extras.push({ prenom: pr, index: ix, id: 'x' + Date.now(), pid: 'x_' + Date.now() + '_' + Math.random().toString(36).slice(2, 5) });
+  S.extras.push({ prenom: pr, index: ix, teeColor: validTeeColor(S.player && S.player.teeColor), id: 'x' + Date.now(), pid: 'x_' + Date.now() + '_' + Math.random().toString(36).slice(2, 5) });
   setv('add-prenom', ''); setv('add-index', '');
   hideAddPlayer(); renderPlayerList();
 }
@@ -447,7 +499,7 @@ function renderPlayerList() {
     d.style.cssText = 'display:flex;align-items:center;gap:10px;padding:12px 14px;background:#fff;border-radius:14px;';
     d.innerHTML = avatarHTML(j, 34) +
       '<div style="flex:1;font-family:\'Barlow Condensed\',sans-serif;font-weight:700;font-size:15px;text-transform:uppercase;">' + fullname(j) + '</div>' +
-      '<div style="font-size:12px;color:var(--muted);">Idx ' + j.index + '</div>' +
+      '<div style="font-size:12px;color:var(--muted);">Idx ' + j.index + ' · ' + teeLabel(j.teeColor) + '</div>' +
       (j.self ? '<span style="font-size:11px;color:var(--green);font-family:\'Barlow Condensed\',sans-serif;font-weight:700;flex-shrink:0;">MOI</span>'
               : '<button onclick="removePlayerExtra(\'' + j.id + '\')" class="x-btn">×</button>');
     el.appendChild(d);
@@ -477,9 +529,9 @@ function createGame() {
   if (!course) { toast('Sélectionne un parcours'); return; }
   var nom = trim('new-name') || ('Partie de ' + S.player.prenom);
 
-  var me = { prenom: S.player.prenom, nom: S.player.nom || '', index: S.player.index, pid: S.player.pid };
+  var me = { prenom: S.player.prenom, nom: S.player.nom || '', index: S.player.index, teeColor: validTeeColor(S.player.teeColor), pid: S.player.pid };
   if (S.player.avatar) me.avatar = S.player.avatar;
-  var players = [me].concat(S.extras.map(function (e) { return { prenom: e.prenom, index: e.index, pid: e.pid }; }));
+  var players = [me].concat(S.extras.map(function (e) { return { prenom: e.prenom, index: e.index, teeColor: validTeeColor(e.teeColor), pid: e.pid }; }));
 
   var id = newGameId();
   var scores = {}; players.forEach(function (j) { scores[j.pid] = Array(18).fill(null); });
@@ -490,6 +542,7 @@ function createGame() {
     courseId: course.id, courseName: course.nom,
     coursePars: course.pars,
     courseHcp: course.hcp || null,
+    teeRatings: course.teeRatings || null,
     parTotal: course.parTotal,
     croixValue: (typeof course.croixValue === 'number' ? course.croixValue : 4),
     mode: 'stroke', host: S.player.pid,
@@ -524,7 +577,7 @@ function joinGameById(id) {
     var inGame = data.players.some(function (p) { return p.pid === myPid; });
     var chain = Promise.resolve();
     if (!inGame) {
-      var me = { prenom: S.player.prenom, nom: S.player.nom || '', index: S.player.index, pid: myPid };
+      var me = { prenom: S.player.prenom, nom: S.player.nom || '', index: S.player.index, teeColor: validTeeColor(S.player.teeColor), pid: myPid };
       if (S.player.avatar) me.avatar = S.player.avatar;
       var np = data.players.concat([me]);
       var ns = Object.assign({}, data.scores); ns[myPid] = Array(18).fill(null);
@@ -701,7 +754,7 @@ function renderSalon() {
     d.style.cssText = 'display:flex;align-items:center;gap:10px;padding:12px 14px;background:#fff;border-radius:14px;box-shadow:0 1px 6px rgba(0,0,0,.05);' + (me ? 'border:2px solid var(--green);' : '');
     d.innerHTML = avatarHTML(j, 34, 'var(--green)') +
       '<div style="font-family:\'Barlow Condensed\',sans-serif;font-weight:700;font-size:15px;text-transform:uppercase;color:var(--text);">' + j.prenom + crown + (me ? ' <span style="font-size:11px;color:var(--green);">(moi)</span>' : '') + '</div>' +
-      '<div style="margin-left:auto;font-size:12px;color:var(--muted);">Index ' + j.index + '</div>' +
+      '<div style="margin-left:auto;font-size:12px;color:var(--muted);">Index ' + j.index + ' · ' + teeLabel(j.teeColor) + '</div>' +
       (canKick ? '<button class="x-btn" title="Retirer" style="margin-left:8px;" onclick="kickPlayer(\'' + j.pid + '\',\'' + esc(j.prenom).replace(/'/g, "\\'") + '\')">×</button>' : '');
     jl.appendChild(d);
   });
@@ -1036,7 +1089,7 @@ function refreshGameUI() {
   if (gs) {
     var u = (S.editable || []).find(function (x) { return x.key === S.activeKey; });
     var st = 0;
-    if (u && u.player && gameHcp()) { st = strokesArray(u.player.index)[t] || 0; }
+    if (u && u.player && gameHcp()) { st = strokesArray(u.player.index, u.player)[t] || 0; }
     if (st > 0) { gs.style.display = 'inline'; gs.textContent = '· ' + (st >= 2 ? st + ' coups rendus' : '1 coup rendu') + ' ⛳'; }
     else gs.style.display = 'none';
   }
@@ -1281,7 +1334,7 @@ function buildScoreEntities() {
   var ents = units.map(function (u) {
     var editable = u.players.some(function (p) { return S.myPids.indexOf(p.pid) >= 0; }) && !S.spectating;
     var scores = (editable && S.local[u.key]) ? S.local[u.key] : getScores(u.key);
-    var sub = u.type === 'team' ? 'Équipe' : ('Index ' + (u.player ? u.player.index : '—'));
+    var sub = u.type === 'team' ? 'Équipe' : ('Index ' + (u.player ? u.player.index : '—') + ' · ' + teeLabel(u.player && u.player.teeColor));
     var hasHost = u.players.some(function (p) { return p.pid === S.game.host; });
     return { label: u.label, sub: sub, p: u.p, scores: scores, key: u.key, editable: editable, me: editable, type: u.type, removable: isHostDevice && !hasHost, player: u.player };
   });
@@ -1291,7 +1344,7 @@ function buildScoreEntities() {
   var isStab = (MODES[S.game.mode] || {}).stableford;
   ents.forEach(function (en) {
     // Coups rendus par trou (joueurs individuels uniquement)
-    en.strokes = (en.type === 'player' && en.player) ? strokesArray(en.player.index) : null;
+    en.strokes = (en.type === 'player' && en.player) ? strokesArray(en.player.index, en.player) : null;
     en.hasNet = !!en.strokes;
     var gross = unitTotals(en.scores, pars, null, cv, false);
     var net = unitTotals(en.scores, pars, en.strokes, cv, true);

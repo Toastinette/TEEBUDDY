@@ -7,6 +7,9 @@
 
 /* ── Parcours de golf ───────────────────────────────────────────────────────
    pars      : tableau des 18 pars, du trou 1 au trou 18
+   teeRatings: valeurs WHS par couleur de départ.
+               Remplace les valeurs ci-dessous par les Course Rating et Slope
+               officiels du parcours pour que les coups rendus varient par repère.
    parTotal  : somme des pars (calculée mais notée pour affichage rapide)
 ---------------------------------------------------------------------------- */
 window.COURSES = [
@@ -16,11 +19,18 @@ window.COURSES = [
     trous: 18,
     pars: [4, 3, 4, 4, 5, 3, 4, 4, 5, 3, 4, 3, 4, 5, 3, 4, 4, 5],
     hcp:  [10, 6, 8, 4, 14, 16, 12, 17, 2, 5, 7, 13, 9, 11, 15, 1, 3, 18],
-    parTotal: 72,
+    teeRatings: {
+      blanc: { slope: 133, courseRating: 71.5, par: 71 },
+      jaune: { slope: 135, courseRating: 69.4, par: 71 },
+      bleu:  { slope: 132, courseRating: 72.0, par: 71 },
+      rouge: { slope: 120, courseRating: 69.7, par: 71 }
+    },
+    parTotal: 71,
     croixValue: 4
   }
   // Pour ajouter un parcours, copie le bloc ci-dessus :
-  // { id:'mon-golf', nom:'Mon Golf', trous:18, pars:[...18 valeurs...], hcp:[...18 valeurs 1-18...], parTotal: XX, croixValue: 4 }
+  // { id:'mon-golf', nom:'Mon Golf', trous:18, pars:[...18 valeurs...], hcp:[...18 valeurs 1-18...],
+  //   teeRatings:{ jaune:{ slope:113, courseRating:72.0, par:72 } }, parTotal: XX, croixValue: 4 }
 ];
 
 /* ── Modes de jeu ───────────────────────────────────────────────────────────

@@ -6,7 +6,6 @@
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="mobile-web-app-capable" content="yes">
 <meta name="theme-color" content="#2ECC71">
-  <link rel="manifest" href="manifest.json">
 <title>Teebuddy</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Barlow+Condensed:wght@400;600;700;800;900&family=Barlow:wght@400;500;600&display=swap">
@@ -25,6 +24,16 @@
         <div><div class="L" style="margin-bottom:8px;">Prénom</div><input class="inp" id="ob-prenom" placeholder="Prénom" maxlength="20" autocomplete="off"></div>
         <div><div class="L" style="margin-bottom:8px;">Nom</div><input class="inp" id="ob-nom" placeholder="Nom" maxlength="30" autocomplete="off"></div>
         <div><div class="L" style="margin-bottom:8px;">Index de golf</div><input class="inp" id="ob-index" placeholder="Ex : 12.4" type="number" step="0.1" min="0" max="54" inputmode="decimal"></div>
+        <div>
+          <div class="L" style="margin-bottom:8px;">Couleur de départ</div>
+          <input type="hidden" id="ob-tee" value="jaune">
+          <div class="tee-picker">
+            <button type="button" id="ob-tee-blanc" class="tee-chip tee-blanc" onclick="selectTeeColor('ob','blanc')">Blanc</button>
+            <button type="button" id="ob-tee-jaune" class="tee-chip tee-jaune active" onclick="selectTeeColor('ob','jaune')">Jaune</button>
+            <button type="button" id="ob-tee-bleu" class="tee-chip tee-bleu" onclick="selectTeeColor('ob','bleu')">Bleu</button>
+            <button type="button" id="ob-tee-rouge" class="tee-chip tee-rouge" onclick="selectTeeColor('ob','rouge')">Rouge</button>
+          </div>
+        </div>
         <button class="btn B-green" onclick="saveOnboard()" style="margin-top:6px;font-size:18px;padding:20px;">C'est parti ⛳</button>
       </div>
       <div style="font-size:12px;color:var(--muted);margin-top:16px;text-align:center;">Tu pourras ajouter une photo de profil ensuite 📷</div>
@@ -95,6 +104,16 @@
         <div><div class="L" style="margin-bottom:8px;">Prénom</div><input class="inp" id="pf-prenom" placeholder="Prénom" maxlength="20"></div>
         <div><div class="L" style="margin-bottom:8px;">Nom</div><input class="inp" id="pf-nom" placeholder="Nom" maxlength="30"></div>
         <div><div class="L" style="margin-bottom:8px;">Index</div><input class="inp" id="pf-index" placeholder="Ex : 12.4" type="number" step="0.1" min="0" max="54" inputmode="decimal"></div>
+        <div>
+          <div class="L" style="margin-bottom:8px;">Couleur de départ</div>
+          <input type="hidden" id="pf-tee" value="jaune">
+          <div class="tee-picker">
+            <button type="button" id="pf-tee-blanc" class="tee-chip tee-blanc" onclick="selectTeeColor('pf','blanc')">Blanc</button>
+            <button type="button" id="pf-tee-jaune" class="tee-chip tee-jaune active" onclick="selectTeeColor('pf','jaune')">Jaune</button>
+            <button type="button" id="pf-tee-bleu" class="tee-chip tee-bleu" onclick="selectTeeColor('pf','bleu')">Bleu</button>
+            <button type="button" id="pf-tee-rouge" class="tee-chip tee-rouge" onclick="selectTeeColor('pf','rouge')">Rouge</button>
+          </div>
+        </div>
         <button class="btn B-green" onclick="saveProfil()" style="margin-top:4px;">Enregistrer</button>
       </div>
     </div>

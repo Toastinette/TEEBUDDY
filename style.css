@@ -119,6 +119,22 @@ body {
 }
 .select:focus { border-color: var(--green); }
 
+/* ── Choix de couleur de départ ───────────────────────────────────────── */
+.tee-picker { display: grid; grid-template-columns: repeat(4, 1fr); gap: 8px; }
+.tee-chip {
+  min-width: 0;
+  border: 2px solid var(--border); border-radius: 16px;
+  padding: 11px 4px;
+  font-family: 'Barlow Condensed', sans-serif; font-weight: 800; font-size: 13px;
+  text-transform: uppercase; letter-spacing: .04em;
+  cursor: pointer; -webkit-tap-highlight-color: transparent;
+}
+.tee-chip.active { border-color: var(--text); box-shadow: inset 0 0 0 2px rgba(26,26,26,.12); }
+.tee-blanc { background: #fff; color: var(--text); }
+.tee-jaune { background: #F6C945; color: #1A1A1A; }
+.tee-bleu  { background: #2779D8; color: #fff; }
+.tee-rouge { background: var(--red); color: #fff; }
+
 /* ── Sélecteur de trous ────────────────────────────────────────────────── */
 .holes-row { display: flex; gap: 6px; overflow-x: auto; padding: 0 16px; scrollbar-width: none; -webkit-overflow-scrolling: touch; }
 .holes-row::-webkit-scrollbar { display: none; }
