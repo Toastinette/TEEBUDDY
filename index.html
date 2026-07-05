@@ -28,10 +28,10 @@
           <div class="L" style="margin-bottom:8px;">Couleur de départ</div>
           <input type="hidden" id="ob-tee" value="jaune">
           <div class="tee-picker">
-            <button type="button" id="ob-tee-blanc" class="tee-chip tee-blanc" onclick="selectTeeColor('ob','blanc')">Blanc</button>
-            <button type="button" id="ob-tee-jaune" class="tee-chip tee-jaune active" onclick="selectTeeColor('ob','jaune')">Jaune</button>
-            <button type="button" id="ob-tee-bleu" class="tee-chip tee-bleu" onclick="selectTeeColor('ob','bleu')">Bleu</button>
-            <button type="button" id="ob-tee-rouge" class="tee-chip tee-rouge" onclick="selectTeeColor('ob','rouge')">Rouge</button>
+            <button type="button" id="ob-tee-blanc" class="tee-chip" onclick="selectTeeColor('ob','blanc')"><span class="dot dot-blanc"></span>Blanc</button>
+            <button type="button" id="ob-tee-jaune" class="tee-chip active" onclick="selectTeeColor('ob','jaune')"><span class="dot dot-jaune"></span>Jaune</button>
+            <button type="button" id="ob-tee-bleu" class="tee-chip" onclick="selectTeeColor('ob','bleu')"><span class="dot dot-bleu"></span>Bleu</button>
+            <button type="button" id="ob-tee-rouge" class="tee-chip" onclick="selectTeeColor('ob','rouge')"><span class="dot dot-rouge"></span>Rouge</button>
           </div>
         </div>
         <button class="btn B-green" onclick="saveOnboard()" style="margin-top:6px;font-size:18px;padding:20px;">C'est parti ⛳</button>
@@ -108,10 +108,10 @@
           <div class="L" style="margin-bottom:8px;">Couleur de départ</div>
           <input type="hidden" id="pf-tee" value="jaune">
           <div class="tee-picker">
-            <button type="button" id="pf-tee-blanc" class="tee-chip tee-blanc" onclick="selectTeeColor('pf','blanc')">Blanc</button>
-            <button type="button" id="pf-tee-jaune" class="tee-chip tee-jaune active" onclick="selectTeeColor('pf','jaune')">Jaune</button>
-            <button type="button" id="pf-tee-bleu" class="tee-chip tee-bleu" onclick="selectTeeColor('pf','bleu')">Bleu</button>
-            <button type="button" id="pf-tee-rouge" class="tee-chip tee-rouge" onclick="selectTeeColor('pf','rouge')">Rouge</button>
+            <button type="button" id="pf-tee-blanc" class="tee-chip" onclick="selectTeeColor('pf','blanc')"><span class="dot dot-blanc"></span>Blanc</button>
+            <button type="button" id="pf-tee-jaune" class="tee-chip active" onclick="selectTeeColor('pf','jaune')"><span class="dot dot-jaune"></span>Jaune</button>
+            <button type="button" id="pf-tee-bleu" class="tee-chip" onclick="selectTeeColor('pf','bleu')"><span class="dot dot-bleu"></span>Bleu</button>
+            <button type="button" id="pf-tee-rouge" class="tee-chip" onclick="selectTeeColor('pf','rouge')"><span class="dot dot-rouge"></span>Rouge</button>
           </div>
         </div>
         <button class="btn B-green" onclick="saveProfil()" style="margin-top:4px;">Enregistrer</button>
@@ -198,7 +198,7 @@
       <button onclick="cycleActive()" style="display:flex;align-items:center;gap:10px;background:none;border:none;padding:0;cursor:pointer;-webkit-tap-highlight-color:transparent;" title="Changer de joueur"><div id="g-av" class="av" style="width:34px;height:34px;font-size:15px;background:var(--green);">M</div><span class="D" style="font-size:17px;" id="g-name">MON NOM</span></button>
       <div style="display:flex;align-items:center;gap:8px;">
         <span id="g-viewers" style="display:none;align-items:center;gap:3px;font-family:'Barlow Condensed',sans-serif;font-weight:700;font-size:13px;color:var(--muted);">👁 <span id="g-viewers-n">0</span></span>
-        <button class="btn B-ico" onclick="go('s-scores')"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="18" height="18" rx="2"/><line x1="3" y1="9" x2="21" y2="9"/><line x1="3" y1="15" x2="21" y2="15"/><line x1="9" y1="9" x2="9" y2="21"/></svg></button>
+        <button class="btn B-ico" onclick="openSheet()"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="18" height="18" rx="2"/><line x1="3" y1="9" x2="21" y2="9"/><line x1="3" y1="15" x2="21" y2="15"/><line x1="9" y1="9" x2="9" y2="21"/></svg></button>
         <button class="btn B-ico" onclick="go('s-menu')"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><line x1="3" y1="6" x2="21" y2="6"/><line x1="3" y1="12" x2="21" y2="12"/><line x1="3" y1="18" x2="21" y2="18"/></svg></button>
       </div>
     </div>
@@ -211,6 +211,7 @@
     <div id="g-vote" style="display:none;padding:8px 20px 0;"></div>
     <div style="background:var(--bg);padding:6px 0 8px;"><div class="holes-row" id="g-holes"></div></div>
     <div style="flex:1;display:flex;flex-direction:column;align-items:center;justify-content:center;padding:8px 24px;">
+      <div id="g-msg"></div>
       <div class="L" style="margin-bottom:6px;">Trou <span id="g-hn">1</span> · Par <span id="g-par">4</span><span id="g-stroke" style="display:none;color:var(--green);margin-left:8px;"></span></div>
       <div id="g-slabel" style="font-family:'Barlow Condensed',sans-serif;font-weight:900;font-size:20px;text-transform:uppercase;letter-spacing:.1em;min-height:28px;margin-bottom:6px;text-align:center;"></div>
       <div style="display:flex;align-items:center;gap:24px;margin:6px 0;">
@@ -227,6 +228,9 @@
     </div>
     <div style="padding:0 24px 10px;">
       <button class="btn" onclick="endGame()" style="background:#FFF0F0;color:var(--red);border-radius:var(--r);padding:13px;width:100%;font-family:'Barlow Condensed',sans-serif;font-weight:800;font-size:14px;letter-spacing:.05em;text-transform:uppercase;gap:8px;">🏁 Terminer la partie</button>
+    </div>
+    <div id="g-peek" onclick="openSheet()">
+      <span class="live-pill"><span class="pdot"></span>LIVE</span><span class="peek-txt">SCORECARDS</span>
     </div>
   </div>
 
@@ -319,6 +323,25 @@
 
 </div><!-- #app -->
 <div id="toast"></div>
+
+<!-- Calque Live Scorecards (monte par-dessus l'écran de saisie) -->
+<div id="live-sheet">
+  <div id="sheet-head">
+    <div class="grab"></div>
+    <div style="display:flex;align-items:center;justify-content:space-between;gap:10px;">
+      <span class="live-pill" style="flex-shrink:0;"><span class="pdot"></span>LIVE</span>
+      <div class="D" style="font-size:20px;color:#fff;flex:1;text-align:center;">Scorecards</div>
+      <button onclick="closeSheet()" style="background:rgba(255,255,255,.2);border:none;color:#fff;width:34px;height:34px;border-radius:50%;font-size:18px;cursor:pointer;flex-shrink:0;-webkit-tap-highlight-color:transparent;">⌄</button>
+    </div>
+    <div id="sheet-net" style="display:none;margin-top:10px;justify-content:center;">
+      <div style="display:inline-flex;background:rgba(0,0,0,.18);border-radius:30px;padding:3px;">
+        <button id="sh-net-brut" onclick="setNetView(false)" class="net-toggle active">Brut</button>
+        <button id="sh-net-net" onclick="setNetView(true)" class="net-toggle">Net</button>
+      </div>
+    </div>
+  </div>
+  <div id="sheet-cards"></div>
+</div>
 
 <!-- Sélecteur DF : choisir un joueur de son départ -->
 <div id="df-picker" style="display:none;position:fixed;inset:0;z-index:9000;background:rgba(0,0,0,.5);align-items:flex-end;">

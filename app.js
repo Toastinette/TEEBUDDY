@@ -69,6 +69,7 @@ function pickMsg(type, name) {
 function boot() {
   applyLogos();
   addFooters();
+  initSheetGestures();
   if (!FB_OK) { showScreen('s-home'); toast('⚠️ Connexion Firebase indisponible'); }
 
   var p = lget('tb_player');
@@ -724,6 +725,7 @@ function attachGameListener(id) {
     if (isActive('s-scores'))   refreshScores();
     if (isActive('s-settings')) renderSettings();
     if (isActive('s-game'))     refreshGameUI();
+    if (S.sheetOpen) renderSheet();
   }, function (err) { console.error('game', err); });
 }
 function isActive(id) { var e = document.getElementById(id); return e && e.classList.contains('active'); }
@@ -1141,6 +1143,7 @@ function chScore(d) {
   var t = S.hole, par = S.game.coursePars[t], cur = arr[t];
   var nxt = (typeof cur === 'number') ? Math.max(1, cur + d) : (d > 0 ? par : Math.max(1, par - 1));
   arr[t] = nxt; S.notified[t] = false;
+  buzz(12); popScore();
   saveScore(); refreshGameUI();
 }
 function setCross() {
@@ -1149,10 +1152,11 @@ function setCross() {
   var t = S.hole;
   var becomingCross = arr[t] !== 'X';
   arr[t] = becomingCross ? 'X' : null;
-  S.notified[t] = true;       // pas de toast birdie sur une croix
+  S.notified[t] = true;       // pas de message birdie sur une croix
+  buzz(becomingCross ? [15, 40, 15] : 12); popScore();
   if (becomingCross) {
     var u = (S.editable || []).find(function (x) { return x.key === S.activeKey; });
-    toast(pickMsg('croix', u ? u.label : ''));
+    gameMsg(pickMsg('croix', u ? u.label : ''), false);
   }
   saveScore(); refreshGameUI();
 }
@@ -1194,7 +1198,7 @@ function leaveHole() {
   // Le par "neutre" ne s'affiche pas systématiquement (sauf comeback)
   var show = true;
   if (type === 'par') show = Math.random() < 0.45;
-  if (show) toast(pickMsg(type, nom), good);
+  if (show) gameMsg(pickMsg(type, nom), good);
   S.notified[t] = true;
 }
 function prevH() { if (S.hole > 0) { leaveHole(); S.hole--; refreshGameUI(); } }
@@ -1382,7 +1386,11 @@ function setNetView(net) {
   var b = document.getElementById('sc-net-brut'), n = document.getElementById('sc-net-net');
   if (b) b.className = 'net-toggle' + (net ? '' : ' active');
   if (n) n.className = 'net-toggle' + (net ? ' active' : '');
+  var sb = document.getElementById('sh-net-brut'), sn = document.getElementById('sh-net-net');
+  if (sb) sb.className = 'net-toggle' + (net ? '' : ' active');
+  if (sn) sn.className = 'net-toggle' + (net ? ' active' : '');
   refreshScores();
+  if (S.sheetOpen) renderSheet();
 }
 function refreshScores() {
   var box = document.getElementById('sc-cards');
@@ -1491,7 +1499,7 @@ function scoreCard(en, rank, pars) {
 
 /* ── Fin / quitter (avec suppression auto) ─────────────────────────────── */
 function endGame() {
-  if (!S.game) return; leaveHole();
+  if (!S.game) return; leaveHole(); closeSheet();
   txt('fin-sub', (S.game.name || S.game.courseName) + ' · ' + MODES[S.game.mode].label);
   var pars = S.game.coursePars;
   var ents = buildScoreEntities();
@@ -1560,6 +1568,7 @@ function backHome() { confirmEnd(); }
 function clearSessionLocal() {
   if (S.unsub) { S.unsub(); S.unsub = null; }
   stopHeartbeat();
+  closeSheet();
   S.game = null; S.gameId = null; S.hole = 0; S.started = false; S.spectating = false;
   S.myPids = []; S.editable = []; S.activeKey = null; S.local = {}; S.writeTs = {};
   S.extras = []; S.notified = {};
@@ -1700,8 +1709,130 @@ function fullname(j) { return j.prenom + (j.nom ? ' ' + j.nom : ''); }
 function esc(s) { return String(s == null ? '' : s).replace(/[&<>"]/g, function (c) { return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]; }); }
 function lget(k) { try { return JSON.parse(localStorage.getItem(k)); } catch (e) { return null; } }
 function lset(k, v) { try { localStorage.setItem(k, JSON.stringify(v)); } catch (e) {} }
+/* ════════════════════════════════════════════════════════════════════════
+   LIVE SCORECARDS — calque qui monte par-dessus l'écran de saisie.
+   Ouvert par : tap sur l'amorce, swipe vertical depuis l'amorce, ou bouton
+   grille en haut. Fermé par : swipe vers le bas sur l'en-tête, ou bouton ⌄.
+════════════════════════════════════════════════════════════════════════ */
+function sheetEl() { return document.getElementById('live-sheet'); }
+function openSheet() {
+  if (!S.game) { toast('Aucune partie en cours'); return; }
+  renderSheet();
+  var el = sheetEl(); if (!el) return;
+  el.classList.remove('dragging'); el.style.transform = '';
+  el.classList.add('open');
+  S.sheetOpen = true;
+  buzz(8);
+}
+function closeSheet() {
+  var el = sheetEl(); if (!el) return;
+  el.classList.remove('dragging'); el.style.transform = '';
+  el.classList.remove('open');
+  S.sheetOpen = false;
+}
+function renderSheet() {
+  var box = document.getElementById('sheet-cards'); if (!box || !S.game) return;
+  // Bascule Brut/Net (Stroke Play + handicap dispo uniquement)
+  var nw = document.getElementById('sheet-net');
+  if (nw) nw.style.display = netAvailable() ? 'flex' : 'none';
+  var b = document.getElementById('sh-net-brut'), n = document.getElementById('sh-net-net');
+  if (b) b.className = 'net-toggle' + (S.netView ? '' : ' active');
+  if (n) n.className = 'net-toggle' + (S.netView ? ' active' : '');
+  box.innerHTML = '';
+  var pars = S.game.coursePars;
+  buildScoreEntities().forEach(function (en, rank) {
+    var card = scoreCard(en, rank, pars);
+    if (en.editable) {
+      // Dans le calque : choisir sa carte = passer en saisie dessus et refermer
+      card.onclick = function () { setActiveEntity(en.key); closeSheet(); };
+    }
+    box.appendChild(card);
+  });
+}
+
+/* Glisser : l'amorce se tire vers le haut, l'en-tête du calque vers le bas */
+function initSheetGestures() {
+  var peek = document.getElementById('g-peek');
+  var sheet = sheetEl();
+  var head = document.getElementById('sheet-head');
+  if (!peek || !sheet || !head) return;
+  var vh = function () { return window.innerHeight; };
+
+  // Amorce → ouvrir (le calque suit le doigt)
+  var startY = null, dragged = false;
+  peek.addEventListener('touchstart', function (e) {
+    startY = e.touches[0].clientY; dragged = false;
+    if (!S.game) return;
+    renderSheet();
+  }, { passive: true });
+  peek.addEventListener('touchmove', function (e) {
+    if (startY === null || !S.game) return;
+    var dy = startY - e.touches[0].clientY;   // >0 = vers le haut
+    if (dy > 6) {
+      dragged = true;
+      sheet.classList.add('dragging');
+      sheet.style.transform = 'translateY(' + Math.max(0, vh() - dy) + 'px)';
+      e.preventDefault();
+    }
+  }, { passive: false });
+  peek.addEventListener('touchend', function (e) {
+    if (startY === null) return;
+    var dy = startY - e.changedTouches[0].clientY;
+    startY = null;
+    if (!S.game) return;
+    if (!dragged || dy > 90) { openSheet(); }
+    else { closeSheet(); }
+  });
+
+  // En-tête du calque → fermer (le calque suit le doigt vers le bas)
+  var hStart = null, hDragged = false;
+  head.addEventListener('touchstart', function (e) {
+    if (e.target.closest('button')) return;   // laisser vivre les boutons (⌄, Brut/Net)
+    hStart = e.touches[0].clientY; hDragged = false;
+  }, { passive: true });
+  head.addEventListener('touchmove', function (e) {
+    if (hStart === null) return;
+    var dy = e.touches[0].clientY - hStart;   // >0 = vers le bas
+    if (dy > 6) {
+      hDragged = true;
+      sheet.classList.add('dragging');
+      sheet.style.transform = 'translateY(' + Math.max(0, dy) + 'px)';
+      e.preventDefault();
+    }
+  }, { passive: false });
+  head.addEventListener('touchend', function (e) {
+    if (hStart === null) return;
+    var dy = e.changedTouches[0].clientY - hStart;
+    hStart = null;
+    if (hDragged && dy > 110) closeSheet();
+    else { sheet.classList.remove('dragging'); sheet.style.transform = ''; }
+  });
+}
+
 function toast(msg, ok) {
   var el = document.getElementById('toast'); if (!el) return;
   el.textContent = msg; el.className = 'show' + (ok ? ' ok' : '');
   clearTimeout(window._tt); window._tt = setTimeout(function () { el.className = ''; }, 3200);
+}
+
+/* ── Feedback sensoriel ────────────────────────────────────────────────── */
+/* Vibration (Android ; sans effet sur iPhone, le pop visuel prend le relais) */
+function buzz(pattern) {
+  try { if (navigator.vibrate) navigator.vibrate(pattern); } catch (e) {}
+}
+/* Petit "pop" du chiffre du score à chaque saisie */
+function popScore() {
+  var el = document.getElementById('g-score'); if (!el) return;
+  el.classList.remove('pop');
+  void el.offsetWidth;   // force le redémarrage de l'animation
+  el.classList.add('pop');
+}
+/* Message de score affiché au-dessus de la ligne Trou · Par */
+function gameMsg(msg, good) {
+  var el = document.getElementById('g-msg'); if (!el) { toast(msg, good); return; }
+  el.textContent = msg;
+  el.style.color = good ? 'var(--green)' : 'var(--orange)';
+  el.classList.add('show');
+  clearTimeout(window._gm);
+  window._gm = setTimeout(function () { el.classList.remove('show'); }, 4000);
 }
