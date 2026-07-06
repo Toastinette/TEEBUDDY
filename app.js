@@ -485,9 +485,14 @@ function testVibration(fromToggle) {
     setVibrationStatus('Vibration non disponible sur cet appareil ou ce navigateur.', true);
     return false;
   }
-  var ok = buzz(70, true);
-  if (ok) setVibrationStatus(fromToggle ? 'Vibration activée.' : 'Test envoyé.');
-  else setVibrationStatus('Vibration refusée ou désactivée par le système.', true);
+  var ok = buzz([350, 120, 350, 120, 500]);
+  if (ok) {
+    setVibrationStatus(fromToggle
+      ? 'Vibration activée. Si tu ne sens rien, vérifie les vibrations système Android.'
+      : 'Test envoyé. Si tu ne sens rien, vérifie les vibrations système Android.');
+  } else {
+    setVibrationStatus('Vibration refusée par le navigateur ou désactivée par le système.', true);
+  }
   return ok;
 }
 function syncPlayerProfileToGame() {
@@ -1190,7 +1195,7 @@ function chScore(d) {
   var t = S.hole, par = S.game.coursePars[t], cur = arr[t];
   var nxt = (typeof cur === 'number') ? Math.max(1, cur + d) : (d > 0 ? par : Math.max(1, par - 1));
   arr[t] = nxt; S.notified[t] = false;
-  buzz(12); popScore();
+  buzz(70); popScore();
   saveScore(); refreshGameUI();
 }
 function setCross() {
@@ -1200,7 +1205,7 @@ function setCross() {
   var becomingCross = arr[t] !== 'X';
   arr[t] = becomingCross ? 'X' : null;
   S.notified[t] = true;       // pas de message birdie sur une croix
-  buzz(becomingCross ? [15, 40, 15] : 12); popScore();
+  buzz(becomingCross ? [90, 60, 120] : 70); popScore();
   if (becomingCross) {
     var u = (S.editable || []).find(function (x) { return x.key === S.activeKey; });
     gameMsg(pickMsg('croix', u ? u.label : ''), false);
@@ -1248,12 +1253,12 @@ function leaveHole() {
   if (show) gameMsg(pickMsg(type, nom), good);
   S.notified[t] = true;
 }
-function prevH() { if (S.hole > 0) { leaveHole(); S.hole--; buzz(18); refreshGameUI(); } }
+function prevH() { if (S.hole > 0) { leaveHole(); S.hole--; buzz(80); refreshGameUI(); } }
 function nextH() {
-  if (S.hole < 17) { leaveHole(); S.hole++; buzz(18); refreshGameUI(); }
+  if (S.hole < 17) { leaveHole(); S.hole++; buzz(80); refreshGameUI(); }
   else {
     leaveHole();
-    buzz(18);
+    buzz(80);
     var done = countPlayed(getScores(S.activeKey));
     toast(done === 18 ? '🏆 18 trous joués ! Bravo !' : 'Dernier trou · ' + done + '/18', done === 18);
   }
@@ -1778,14 +1783,14 @@ function openSheet() {
   el.classList.remove('dragging'); el.style.transform = '';
   el.classList.add('open');
   S.sheetOpen = true;
-  buzz(18);
+  buzz(80);
 }
 function closeSheet(silent) {
   var el = sheetEl(); if (!el) return;
   el.classList.remove('dragging'); el.style.transform = '';
   el.classList.remove('open');
   S.sheetOpen = false;
-  if (!silent) buzz(12);
+  if (!silent) buzz(60);
 }
 function renderSheet() {
   var box = document.getElementById('sheet-cards'); if (!box || !S.game) return;
@@ -1865,8 +1870,8 @@ function buzz(pattern) {
     if (S.settings && S.settings.vibration === false) return false;
     if (!navigator.vibrate) return false;
     var p = Array.isArray(pattern)
-      ? pattern.map(function (v) { return Math.max(20, v); })
-      : Math.max(20, pattern || 20);
+      ? pattern.map(function (v) { return Math.max(60, v); })
+      : Math.max(60, pattern || 60);
     return navigator.vibrate(p);
   } catch (e) {}
   return false;
