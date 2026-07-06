@@ -116,6 +116,21 @@
         </div>
         <button class="btn B-green" onclick="saveProfil()" style="margin-top:4px;">Enregistrer</button>
       </div>
+      <div class="card settings-card">
+        <div class="L" style="margin-bottom:14px;">Réglages</div>
+        <div class="setting-row">
+          <div>
+            <div class="D" style="font-size:17px;">Vibration</div>
+            <div class="setting-help">Retour tactile sur les actions de score.</div>
+          </div>
+          <label class="switch">
+            <input id="set-vibration" type="checkbox" onchange="toggleVibration(this)">
+            <span></span>
+          </label>
+        </div>
+        <button type="button" class="setting-test" onclick="testVibration(false)">Tester la vibration</button>
+        <div id="set-vibration-status" class="setting-status"></div>
+      </div>
     </div>
   </div>
 

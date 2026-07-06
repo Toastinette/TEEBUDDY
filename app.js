@@ -42,7 +42,8 @@ var S = {
   activeKey: null,    // clé de l'unité de score actuellement saisie
   local: {},          // copie locale des scores par clé d'unité { key: [18] }
   writeTs: {},        // horodatage des dernières écritures (anti-écrasement)
-  netView: false      // affichage des cartes en net (coups rendus) au lieu de brut
+  netView: false,     // affichage des cartes en net (coups rendus) au lieu de brut
+  settings: { vibration: true }
 };
 var selCourse = (COURSES[0] && COURSES[0].id) || null;
 
@@ -69,6 +70,7 @@ function pickMsg(type, name) {
 function boot() {
   applyLogos();
   addFooters();
+  loadLocalSettings();
   initSheetGestures();
   if (!FB_OK) { showScreen('s-home'); toast('⚠️ Connexion Firebase indisponible'); }
 
@@ -435,6 +437,7 @@ function fillProfilForm() {
   txt('pf-idx', (S.player.index || '—') + ' · ' + teeLabel(S.player.teeColor));
   var rm = document.getElementById('pf-remove-av');
   if (rm) rm.style.display = S.player.avatar ? 'block' : 'none';
+  fillSettingsForm();
 }
 function saveProfil() {
   var pr = trim('pf-prenom'), no = trim('pf-nom'), ix = parseFloat(val('pf-index')) || 0;
@@ -445,6 +448,47 @@ function saveProfil() {
   syncPlayerProfileToGame();
   toast('Profil mis à jour ✓', true);
   setTimeout(back, 700);
+}
+function loadLocalSettings() {
+  var st = lget('tb_settings') || {};
+  S.settings = Object.assign({ vibration: true }, st);
+}
+function saveLocalSettings() {
+  lset('tb_settings', S.settings || { vibration: true });
+}
+function fillSettingsForm() {
+  var vib = document.getElementById('set-vibration');
+  if (vib) vib.checked = !S.settings || S.settings.vibration !== false;
+  setVibrationStatus('');
+}
+function setVibrationStatus(msg, bad) {
+  var el = document.getElementById('set-vibration-status'); if (!el) return;
+  el.textContent = msg || '';
+  el.className = bad ? 'setting-status bad' : 'setting-status';
+}
+function toggleVibration(input) {
+  if (!S.settings) S.settings = { vibration: true };
+  S.settings.vibration = !!input.checked;
+  saveLocalSettings();
+  if (!S.settings.vibration) {
+    setVibrationStatus('Vibration désactivée sur ce téléphone.');
+    return;
+  }
+  testVibration(true);
+}
+function testVibration(fromToggle) {
+  if (S.settings && S.settings.vibration === false) {
+    setVibrationStatus('Active la vibration pour lancer un test.');
+    return false;
+  }
+  if (!navigator.vibrate) {
+    setVibrationStatus('Vibration non disponible sur cet appareil ou ce navigateur.', true);
+    return false;
+  }
+  var ok = buzz(70, true);
+  if (ok) setVibrationStatus(fromToggle ? 'Vibration activée.' : 'Test envoyé.');
+  else setVibrationStatus('Vibration refusée ou désactivée par le système.', true);
+  return ok;
 }
 function syncPlayerProfileToGame() {
   if (!FB_OK || !S.game || !S.player || !S.gameId) return;
@@ -1723,6 +1767,8 @@ function updateSheetDock(id) {
   var el = sheetEl(); if (!el) return;
   var docked = id === 's-game' && !!S.game;
   el.classList.toggle('docked', docked);
+  var game = document.getElementById('s-game');
+  if (game) game.classList.toggle('sheet-docked', docked);
   if (!docked) closeSheet(true);
 }
 function openSheet() {
@@ -1816,12 +1862,14 @@ function toast(msg, ok) {
 /* Vibration (Android ; sans effet sur iPhone, le pop visuel prend le relais) */
 function buzz(pattern) {
   try {
-    if (!navigator.vibrate) return;
+    if (S.settings && S.settings.vibration === false) return false;
+    if (!navigator.vibrate) return false;
     var p = Array.isArray(pattern)
       ? pattern.map(function (v) { return Math.max(20, v); })
       : Math.max(20, pattern || 20);
-    navigator.vibrate(p);
+    return navigator.vibrate(p);
   } catch (e) {}
+  return false;
 }
 /* Petit "pop" du chiffre du score à chaque saisie */
 function popScore() {

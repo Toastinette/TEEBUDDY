@@ -193,6 +193,46 @@ body {
   display: flex; flex-direction: column; gap: 10px;
 }
 
+/* ── Réglages profil ───────────────────────────────────────────────────── */
+.settings-card { margin-top: 16px; }
+.setting-row {
+  display: flex; align-items: center; justify-content: space-between; gap: 16px;
+}
+.setting-help {
+  margin-top: 3px;
+  font-size: 13px; color: var(--muted); line-height: 1.35;
+}
+.switch {
+  position: relative; width: 54px; height: 32px; flex-shrink: 0;
+  -webkit-tap-highlight-color: transparent;
+}
+.switch input { position: absolute; opacity: 0; inset: 0; }
+.switch span {
+  position: absolute; inset: 0;
+  border-radius: 999px; background: var(--border);
+  transition: background .18s ease;
+}
+.switch span::before {
+  content: ''; position: absolute; top: 4px; left: 4px;
+  width: 24px; height: 24px; border-radius: 50%;
+  background: #fff; box-shadow: 0 2px 8px rgba(0,0,0,.18);
+  transition: transform .18s ease;
+}
+.switch input:checked + span { background: var(--green); }
+.switch input:checked + span::before { transform: translateX(22px); }
+.setting-test {
+  margin-top: 14px;
+  border: none; background: transparent; color: var(--green);
+  font-family: 'Barlow Condensed', sans-serif; font-weight: 800; font-size: 13px;
+  text-transform: uppercase; letter-spacing: .06em;
+  cursor: pointer; -webkit-tap-highlight-color: transparent;
+}
+.setting-status {
+  min-height: 18px; margin-top: 8px;
+  font-size: 12px; color: var(--muted); line-height: 1.35;
+}
+.setting-status.bad { color: var(--red); }
+
 /* ── En-tête générique (titre + retour) ────────────────────────────────── */
 .head {
   padding: 56px 24px 20px;
@@ -298,6 +338,9 @@ body {
 /* ═══════════════════════════════════════════════════════════════════════
    LIVE SCORECARDS — amorce en bas de la saisie + calque qui monte
 ═══════════════════════════════════════════════════════════════════════ */
+#s-game.sheet-docked {
+  padding-bottom: calc(92px + env(safe-area-inset-bottom));
+}
 .peek-txt {
   font-family: 'Barlow Condensed', sans-serif; font-weight: 800;
   font-size: 19px; letter-spacing: .22em; color: #fff; text-transform: uppercase;
@@ -325,8 +368,12 @@ body {
   will-change: transform;
   pointer-events: none;
 }
-#live-sheet.docked { transform: translateY(calc(100% - var(--sheet-peek-h))); pointer-events: auto; }
-#live-sheet.open { transform: translateY(0); }
+#live-sheet.docked {
+  background: transparent;
+  transform: translateY(calc(100% - var(--sheet-peek-h)));
+  pointer-events: auto;
+}
+#live-sheet.open { background: var(--bg); transform: translateY(0); }
 #live-sheet.dragging { transition: none; }
 #sheet-head {
   background: var(--green);
