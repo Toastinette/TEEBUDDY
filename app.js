@@ -102,6 +102,7 @@ function addFooters() {
   var html = '<img src="hs-logo.png" class="hs-logo" alt=""><img src="hs-text.png" class="hs-text" alt="Powered by Hook & Slice">';
   var screens = document.querySelectorAll('.screen');
   for (var i = 0; i < screens.length; i++) {
+    if (screens[i].id === 's-game') continue;
     var f = document.createElement('div');
     f.className = 'footer';
     f.innerHTML = html;
@@ -337,6 +338,7 @@ function showScreen(id) {
   for (var i = 0; i < sc.length; i++) sc[i].classList.remove('active');
   var el = document.getElementById(id);
   if (el) { el.classList.add('active'); el.scrollTop = 0; }
+  updateSheetDock(id);
   if (S.hist[S.hist.length - 1] !== id) S.hist.push(id);
   if (id === 's-scores') refreshScores();
   if (id === 's-game')   refreshGameUI();
@@ -354,6 +356,7 @@ function back() {
     for (var i = 0; i < sc.length; i++) sc[i].classList.remove('active');
     var el = document.getElementById(prev);
     if (el) { el.classList.add('active'); el.scrollTop = 0; }
+    updateSheetDock(prev);
     if (prev === 's-game')   refreshGameUI();
     if (prev === 's-scores') refreshScores();
     if (prev === 's-salon')  renderSalon();
@@ -724,7 +727,7 @@ function attachGameListener(id) {
     if (isActive('s-salon'))    renderSalon();
     if (isActive('s-scores'))   refreshScores();
     if (isActive('s-settings')) renderSettings();
-    if (isActive('s-game'))     refreshGameUI();
+    if (isActive('s-game'))     { updateSheetDock('s-game'); refreshGameUI(); }
     if (S.sheetOpen) renderSheet();
   }, function (err) { console.error('game', err); });
 }
@@ -1201,11 +1204,12 @@ function leaveHole() {
   if (show) gameMsg(pickMsg(type, nom), good);
   S.notified[t] = true;
 }
-function prevH() { if (S.hole > 0) { leaveHole(); S.hole--; refreshGameUI(); } }
+function prevH() { if (S.hole > 0) { leaveHole(); S.hole--; buzz(18); refreshGameUI(); } }
 function nextH() {
-  if (S.hole < 17) { leaveHole(); S.hole++; refreshGameUI(); }
+  if (S.hole < 17) { leaveHole(); S.hole++; buzz(18); refreshGameUI(); }
   else {
     leaveHole();
+    buzz(18);
     var done = countPlayed(getScores(S.activeKey));
     toast(done === 18 ? '🏆 18 trous joués ! Bravo !' : 'Dernier trou · ' + done + '/18', done === 18);
   }
@@ -1715,6 +1719,12 @@ function lset(k, v) { try { localStorage.setItem(k, JSON.stringify(v)); } catch 
    grille en haut. Fermé par : swipe vers le bas sur l'en-tête, ou bouton ⌄.
 ════════════════════════════════════════════════════════════════════════ */
 function sheetEl() { return document.getElementById('live-sheet'); }
+function updateSheetDock(id) {
+  var el = sheetEl(); if (!el) return;
+  var docked = id === 's-game' && !!S.game;
+  el.classList.toggle('docked', docked);
+  if (!docked) closeSheet(true);
+}
 function openSheet() {
   if (!S.game) { toast('Aucune partie en cours'); return; }
   renderSheet();
@@ -1722,13 +1732,14 @@ function openSheet() {
   el.classList.remove('dragging'); el.style.transform = '';
   el.classList.add('open');
   S.sheetOpen = true;
-  buzz(8);
+  buzz(18);
 }
-function closeSheet() {
+function closeSheet(silent) {
   var el = sheetEl(); if (!el) return;
   el.classList.remove('dragging'); el.style.transform = '';
   el.classList.remove('open');
   S.sheetOpen = false;
+  if (!silent) buzz(12);
 }
 function renderSheet() {
   var box = document.getElementById('sheet-cards'); if (!box || !S.game) return;
@@ -1750,62 +1761,48 @@ function renderSheet() {
   });
 }
 
-/* Glisser : l'amorce se tire vers le haut, l'en-tête du calque vers le bas */
+/* Glisser : l'en-tête visible est la vraie amorce du calque live */
 function initSheetGestures() {
-  var peek = document.getElementById('g-peek');
   var sheet = sheetEl();
   var head = document.getElementById('sheet-head');
-  if (!peek || !sheet || !head) return;
-  var vh = function () { return window.innerHeight; };
+  if (!sheet || !head) return;
+  var dockY = function () { return Math.max(0, sheet.offsetHeight - head.offsetHeight); };
 
-  // Amorce → ouvrir (le calque suit le doigt)
-  var startY = null, dragged = false;
-  peek.addEventListener('touchstart', function (e) {
-    startY = e.touches[0].clientY; dragged = false;
-    if (!S.game) return;
-    renderSheet();
-  }, { passive: true });
-  peek.addEventListener('touchmove', function (e) {
-    if (startY === null || !S.game) return;
-    var dy = startY - e.touches[0].clientY;   // >0 = vers le haut
-    if (dy > 6) {
-      dragged = true;
-      sheet.classList.add('dragging');
-      sheet.style.transform = 'translateY(' + Math.max(0, vh() - dy) + 'px)';
-      e.preventDefault();
-    }
-  }, { passive: false });
-  peek.addEventListener('touchend', function (e) {
-    if (startY === null) return;
-    var dy = startY - e.changedTouches[0].clientY;
-    startY = null;
-    if (!S.game) return;
-    if (!dragged || dy > 90) { openSheet(); }
-    else { closeSheet(); }
-  });
-
-  // En-tête du calque → fermer (le calque suit le doigt vers le bas)
+  // En-tête/amorce : vers le haut pour ouvrir, vers le bas pour fermer.
   var hStart = null, hDragged = false;
   head.addEventListener('touchstart', function (e) {
     if (e.target.closest('button')) return;   // laisser vivre les boutons (⌄, Brut/Net)
+    if (!S.game) return;
+    renderSheet();
     hStart = e.touches[0].clientY; hDragged = false;
   }, { passive: true });
   head.addEventListener('touchmove', function (e) {
     if (hStart === null) return;
-    var dy = e.touches[0].clientY - hStart;   // >0 = vers le bas
-    if (dy > 6) {
+    var diff = e.touches[0].clientY - hStart; // >0 = vers le bas
+    var pos = S.sheetOpen ? Math.max(0, diff) : Math.max(0, dockY() + diff);
+    if (Math.abs(diff) > 6) {
       hDragged = true;
       sheet.classList.add('dragging');
-      sheet.style.transform = 'translateY(' + Math.max(0, dy) + 'px)';
+      sheet.style.transform = 'translateY(' + pos + 'px)';
       e.preventDefault();
     }
   }, { passive: false });
   head.addEventListener('touchend', function (e) {
     if (hStart === null) return;
-    var dy = e.changedTouches[0].clientY - hStart;
+    var diff = e.changedTouches[0].clientY - hStart;
     hStart = null;
-    if (hDragged && dy > 110) closeSheet();
+    if (!S.game) return;
+    if (!hDragged) {
+      if (!S.sheetOpen) openSheet();
+      return;
+    }
+    if (S.sheetOpen && diff > 110) closeSheet();
+    else if (!S.sheetOpen && diff < -90) openSheet();
     else { sheet.classList.remove('dragging'); sheet.style.transform = ''; }
+  });
+  head.addEventListener('click', function (e) {
+    if (e.target.closest('button') || S.sheetOpen || !S.game) return;
+    openSheet();
   });
 }
 
@@ -1818,7 +1815,13 @@ function toast(msg, ok) {
 /* ── Feedback sensoriel ────────────────────────────────────────────────── */
 /* Vibration (Android ; sans effet sur iPhone, le pop visuel prend le relais) */
 function buzz(pattern) {
-  try { if (navigator.vibrate) navigator.vibrate(pattern); } catch (e) {}
+  try {
+    if (!navigator.vibrate) return;
+    var p = Array.isArray(pattern)
+      ? pattern.map(function (v) { return Math.max(20, v); })
+      : Math.max(20, pattern || 20);
+    navigator.vibrate(p);
+  } catch (e) {}
 }
 /* Petit "pop" du chiffre du score à chaque saisie */
 function popScore() {
