@@ -369,7 +369,7 @@ body {
   pointer-events: none;
 }
 #live-sheet.docked {
-  background: transparent;
+  background: var(--bg);
   transform: translateY(calc(100% - var(--sheet-peek-h)));
   pointer-events: auto;
 }
@@ -386,7 +386,6 @@ body {
   display: flex; flex-direction: column; justify-content: center;
 }
 #live-sheet.open #sheet-head { padding-top: calc(10px + env(safe-area-inset-top)); padding-bottom: 14px; }
-#live-sheet.docked:not(.open) #sheet-head { clip-path: polygon(0 22px, 50% 0, 100% 22px, 100% 100%, 0 100%); }
 #live-sheet.docked:not(.open) #sheet-net,
 #live-sheet.docked:not(.open) #sheet-head .grab,
 #live-sheet.docked:not(.open) #sheet-head button { display: none !important; }
@@ -395,6 +394,18 @@ body {
   flex: 0 0 auto !important;
   font-size: 19px !important;
   letter-spacing: .22em;
+  display: inline-flex;
+  align-items: center;
+  gap: 14px;
+}
+#live-sheet.docked:not(.open) #sheet-head > div:nth-child(2) .D::before,
+#live-sheet.docked:not(.open) #sheet-head > div:nth-child(2) .D::after {
+  content: '';
+  width: 9px; height: 9px;
+  border-left: 2px solid rgba(255,255,255,.86);
+  border-top: 2px solid rgba(255,255,255,.86);
+  transform: rotate(45deg);
+  margin-top: 5px;
 }
 #sheet-head .grab {
   width: 44px; height: 5px; border-radius: 3px;
