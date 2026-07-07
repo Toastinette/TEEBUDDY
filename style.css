@@ -389,24 +389,29 @@ body {
 #live-sheet.docked:not(.open) #sheet-net,
 #live-sheet.docked:not(.open) #sheet-head .grab,
 #live-sheet.docked:not(.open) #sheet-head button { display: none !important; }
-#live-sheet.docked:not(.open) #sheet-head > div:nth-child(2) { justify-content: center !important; }
+#live-sheet.docked:not(.open) #sheet-head > div:nth-child(2) {
+  position: relative;
+  justify-content: center !important;
+  gap: 22px !important;
+  width: 100%;
+}
 #live-sheet.docked:not(.open) #sheet-head > div:nth-child(2) .D {
   flex: 0 0 auto !important;
   font-size: 19px !important;
   letter-spacing: .22em;
-  display: inline-flex;
-  align-items: center;
-  gap: 14px;
 }
-#live-sheet.docked:not(.open) #sheet-head > div:nth-child(2) .D::before,
-#live-sheet.docked:not(.open) #sheet-head > div:nth-child(2) .D::after {
+#live-sheet.docked:not(.open) #sheet-head > div:nth-child(2)::before,
+#live-sheet.docked:not(.open) #sheet-head > div:nth-child(2)::after {
   content: '';
+  position: absolute;
+  top: 50%;
   width: 9px; height: 9px;
   border-left: 2px solid rgba(255,255,255,.86);
   border-top: 2px solid rgba(255,255,255,.86);
-  transform: rotate(45deg);
-  margin-top: 5px;
+  transform: translateY(-30%) rotate(45deg);
 }
+#live-sheet.docked:not(.open) #sheet-head > div:nth-child(2)::before { left: 36px; }
+#live-sheet.docked:not(.open) #sheet-head > div:nth-child(2)::after { right: 36px; }
 #sheet-head .grab {
   width: 44px; height: 5px; border-radius: 3px;
   background: rgba(255,255,255,.45);
