@@ -97,6 +97,16 @@ body {
 .inp::placeholder { color: var(--muted); font-weight: 600; }
 /* Champ texte normal (nom de partie) : pas en majuscules */
 .inp.normal { text-transform: none; letter-spacing: normal; font-weight: 600; }
+.index-input { display:flex; align-items:stretch; gap:8px; }
+.index-input .inp { min-width:0; flex:1; }
+.index-input.compact { width:132px; flex-shrink:0; }
+.index-plus {
+  width:50px; flex-shrink:0; border:2px solid var(--border); border-radius:12px;
+  background:var(--bg); color:var(--text); font-size:24px; font-weight:800; cursor:pointer;
+  -webkit-tap-highlight-color:transparent;
+}
+.index-plus.active { background:var(--text); border-color:var(--text); color:#fff; }
+.index-help { margin-top:6px; color:var(--muted); font-size:11px; line-height:1.3; }
 
 /* ── Menu déroulant (sélection parcours) ───────────────────────────────── */
 .select-wrap { position: relative; }

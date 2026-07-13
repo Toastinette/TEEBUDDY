@@ -23,7 +23,7 @@
       <div class="card" style="width:100%;display:flex;flex-direction:column;gap:14px;">
         <div><div class="L" style="margin-bottom:8px;">Prénom</div><input class="inp" id="ob-prenom" placeholder="Prénom" maxlength="20" autocomplete="off"></div>
         <div><div class="L" style="margin-bottom:8px;">Nom</div><input class="inp" id="ob-nom" placeholder="Nom" maxlength="30" autocomplete="off"></div>
-        <div><div class="L" style="margin-bottom:8px;">Index de golf</div><input class="inp" id="ob-index" placeholder="Ex : 12.4" type="number" step="0.1" min="0" max="54" inputmode="decimal"></div>
+        <div><div class="L" style="margin-bottom:8px;">Index de golf</div><div class="index-input"><input class="inp" id="ob-index" placeholder="Ex : 12,4" type="text" inputmode="decimal" maxlength="6" autocomplete="off" oninput="setIndexButtonState(this)"><button type="button" class="index-plus" onclick="togglePlusIndex('ob-index',this)" aria-label="Basculer en index plus">+</button></div><div class="index-help">Joueur meilleur que scratch ? Active le +</div></div>
         <div>
           <div class="L" style="margin-bottom:8px;">Couleur de départ</div>
           <input type="hidden" id="ob-tee" value="jaune">
@@ -103,7 +103,7 @@
       <div class="card" style="display:flex;flex-direction:column;gap:14px;">
         <div><div class="L" style="margin-bottom:8px;">Prénom</div><input class="inp" id="pf-prenom" placeholder="Prénom" maxlength="20"></div>
         <div><div class="L" style="margin-bottom:8px;">Nom</div><input class="inp" id="pf-nom" placeholder="Nom" maxlength="30"></div>
-        <div><div class="L" style="margin-bottom:8px;">Index</div><input class="inp" id="pf-index" placeholder="Ex : 12.4" type="number" step="0.1" min="0" max="54" inputmode="decimal"></div>
+        <div><div class="L" style="margin-bottom:8px;">Index</div><div class="index-input"><input class="inp" id="pf-index" placeholder="Ex : 12,4" type="text" inputmode="decimal" maxlength="6" autocomplete="off" oninput="setIndexButtonState(this)"><button type="button" class="index-plus" onclick="togglePlusIndex('pf-index',this)" aria-label="Basculer en index plus">+</button></div><div class="index-help">Joueur meilleur que scratch ? Active le +</div></div>
         <div>
           <div class="L" style="margin-bottom:8px;">Couleur de départ</div>
           <input type="hidden" id="pf-tee" value="jaune">
@@ -162,7 +162,8 @@
       </div>
       <div id="form-add" style="display:none;" class="card">
         <div class="L" style="margin-bottom:12px;">Nouveau joueur</div>
-        <div style="display:flex;gap:10px;margin-bottom:12px;"><input class="inp" id="add-prenom" placeholder="Prénom" maxlength="20" autocomplete="off" style="flex:1;"><input class="inp" id="add-index" placeholder="Idx" type="number" step="0.1" min="0" max="54" inputmode="decimal" style="width:84px;"></div>
+        <div style="display:flex;gap:10px;margin-bottom:6px;"><input class="inp" id="add-prenom" placeholder="Prénom" maxlength="20" autocomplete="off" style="flex:1;"><div class="index-input compact"><input class="inp" id="add-index" placeholder="Idx" type="text" inputmode="decimal" maxlength="6" autocomplete="off" oninput="setIndexButtonState(this)"><button type="button" class="index-plus" onclick="togglePlusIndex('add-index',this)" aria-label="Basculer en index plus">+</button></div></div>
+        <div class="index-help" style="margin-bottom:12px;text-align:right;">Index plus : active le +</div>
         <div style="display:flex;gap:8px;"><button class="btn B-green" onclick="addPlayer()" style="flex:1;">Ajouter</button><button class="btn B-out" onclick="hideAddPlayer()" style="flex:1;">Annuler</button></div>
       </div>
       <button class="btn B-dark" onclick="createGame()" style="font-size:18px;padding:22px;">⛳ Créer la partie</button>

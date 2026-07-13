@@ -43,8 +43,14 @@ var S = {
   local: {},          // copie locale des scores par clé d'unité { key: [18] }
   writeTs: {},        // horodatage des dernières écritures (anti-écrasement)
   netView: false,     // affichage des cartes en net (coups rendus) au lieu de brut
-  settings: { vibration: true }
+  settings: { vibration: true },
+  activityTimer: null,
+  activityGameId: null,
+  cleanupTimer: null
 };
+var INACTIVE_GAME_HOURS = 6;
+var ACTIVITY_HEARTBEAT_MS = 5 * 60 * 1000;
+var CLEANUP_INTERVAL_MS = 15 * 60 * 1000;
 var selCourse = (COURSES[0] && COURSES[0].id) || null;
 
 /* ── Banque de messages (variés, marrants, tirés au hasard) ────────────── */
@@ -90,7 +96,10 @@ function boot() {
   buildCourseList();
   renderPlayerList();
   renderHomeParties();
-  if (FB_OK) { attachOpenGamesListener(); loadCoursesFromDB(); loadAppSettings(); }
+  if (FB_OK) { attachOpenGamesListener(); loadCoursesFromDB(); loadAppSettings(); scheduleInactiveGameCleanup(); }
+  document.addEventListener('visibilitychange', function () {
+    if (!document.hidden && S.gameId && !S.spectating) touchGameActivity(S.gameId);
+  });
   // Rafraîchit l'affichage des compteurs de spectateurs (retire les inactifs)
   setInterval(function () { if (S.game) updateViewerDisplays(); }, 15000);
 }
@@ -229,27 +238,64 @@ function selectTeeColor(prefix, color) {
   var hidden = document.getElementById(prefix + '-tee');
   if (hidden) hidden.value = color;
 }
+/* Le WHS affiche un joueur meilleur que scratch avec un signe + (ex. +2,1),
+   tandis que sa valeur mathématique est négative pour calculer le score net. */
+function parseGolfIndex(value) {
+  if (typeof value === 'number') return isFinite(value) && Math.abs(value) <= 54 ? Math.round(value * 10) / 10 : null;
+  var raw = String(value == null ? '' : value).trim().replace(/\s/g, '').replace(/[−–—]/g, '-').replace(',', '.');
+  if (raw === '') return 0;
+  if (!/^[+-]?(?:\d+(?:\.\d*)?|\.\d+)$/.test(raw)) return null;
+  var n = parseFloat(raw); if (!isFinite(n) || Math.abs(n) > 54) return null;
+  if (raw.charAt(0) === '+') n = -Math.abs(n);
+  return Math.round(n * 10) / 10;
+}
+function formatGolfIndex(value) {
+  var n = typeof value === 'number' ? value : parseGolfIndex(value);
+  if (n === null || !isFinite(n)) return '—';
+  return n < 0 ? '+' + Math.abs(n) : String(n);
+}
+function setIndexButtonState(input, button) {
+  button = button || (input && input.parentNode && input.parentNode.querySelector('.index-plus'));
+  if (button) button.classList.toggle('active', !!input && /^[+−-]/.test(input.value.trim()));
+}
+function togglePlusIndex(id, button) {
+  var input = document.getElementById(id); if (!input) return;
+  var raw = input.value.trim().replace(/[−–—-]/, '+');
+  input.value = raw.charAt(0) === '+' ? raw.slice(1) : '+' + raw;
+  setIndexButtonState(input, button); input.focus();
+}
+function readGolfIndex(id) {
+  var input = document.getElementById(id), ix = parseGolfIndex(input ? input.value : '');
+  if (ix === null) { toast('Index invalide : utilise une valeur entre 0 et 54, ou + pour un joueur meilleur que scratch'); if (input) input.focus(); }
+  return ix;
+}
+function roundHandicap(value) { return value < 0 ? -Math.round(Math.abs(value)) : Math.round(value); }
 function courseHandicap(index, player) {
-  var ix = parseFloat(index) || 0;
+  var ix = parseGolfIndex(index); if (ix === null) ix = 0;
   var color = validTeeColor(player && player.teeColor);
   var ratings = S.game && S.game.teeRatings ? S.game.teeRatings[color] : null;
   var slope = ratings && parseFloat(ratings.slope);
   var cr = ratings && parseFloat(ratings.courseRating || ratings.rating || ratings.cr);
   var par = ratings && parseFloat(ratings.par || S.game.parTotal);
   if (isFinite(slope) && isFinite(cr) && isFinite(par) && slope > 0) {
-    return Math.max(0, Math.round(ix * slope / 113 + (cr - par)));
+    return roundHandicap(ix * slope / 113 + (cr - par));
   }
-  return Math.max(0, Math.round(ix));
+  return roundHandicap(ix);
 }
-/* Tableau (18) des coups rendus par trou pour un index donné.
-   Coups = handicap de parcours, réparti du trou le plus dur (hcp 1) au plus facile,
-   avec 2e tour si le joueur reçoit plus de 18 coups. */
+/* Tableau signé : positif = coup reçu, négatif = coup rendu. Les coups rendus
+   commencent au Stroke Index 18 conformément au WHS. */
 function strokesArray(index, player) {
   var arr = Array(18).fill(0);
   var hcp = gameHcp(); if (!hcp) return arr;
   var recv = courseHandicap(index, player);
-  var base = Math.floor(recv / 18), r = recv % 18;
-  for (var i = 0; i < 18; i++) { arr[i] = base + (hcp[i] <= r ? 1 : 0); }
+  var count = Math.abs(recv), base = Math.floor(count / 18), r = count % 18;
+  for (var i = 0; i < 18; i++) {
+    if (recv >= 0) arr[i] = base + (hcp[i] <= r ? 1 : 0);
+    else {
+      var givenBack = base + (hcp[i] > 18 - r ? 1 : 0);
+      arr[i] = givenBack ? -givenBack : 0;
+    }
+  }
   return arr;
 }
 /* Totaux d'une unité, en brut ou net */
@@ -416,9 +462,10 @@ function setAvatar(id, p, bg) {
 
 /* ── Onboarding ─────────────────────────────────────────────────────────── */
 function saveOnboard() {
-  var pr = trim('ob-prenom'), no = trim('ob-nom'), ix = parseFloat(val('ob-index')) || 0;
+  var pr = trim('ob-prenom'), no = trim('ob-nom'), ix = readGolfIndex('ob-index');
   var tee = validTeeColor(val('ob-tee') || 'jaune');
   if (!pr) { toast('Entre ton prénom 👋'); return; }
+  if (ix === null) return;
   S.player = { prenom: pr, nom: no, index: ix, teeColor: tee, pid: 'p_' + Date.now() + '_' + Math.random().toString(36).slice(2, 6) };
   lset('tb_player', S.player); updatePlayerUI();
   toast('Bienvenue ' + pr + ' ! ⛳', true);
@@ -430,19 +477,21 @@ function fillProfilForm() {
   if (!S.player) return;
   setv('pf-prenom', S.player.prenom || '');
   setv('pf-nom', S.player.nom || '');
-  setv('pf-index', S.player.index || '');
+  setv('pf-index', formatGolfIndex(S.player.index));
+  setIndexButtonState(document.getElementById('pf-index'));
   selectTeeColor('pf', S.player.teeColor || 'jaune');
   setAvatar('pf-av', S.player, 'var(--green)');
   txt('pf-name', fullname(S.player));
-  txt('pf-idx', (S.player.index || '—') + ' · ' + teeLabel(S.player.teeColor));
+  txt('pf-idx', formatGolfIndex(S.player.index) + ' · ' + teeLabel(S.player.teeColor));
   var rm = document.getElementById('pf-remove-av');
   if (rm) rm.style.display = S.player.avatar ? 'block' : 'none';
   fillSettingsForm();
 }
 function saveProfil() {
-  var pr = trim('pf-prenom'), no = trim('pf-nom'), ix = parseFloat(val('pf-index')) || 0;
+  var pr = trim('pf-prenom'), no = trim('pf-nom'), ix = readGolfIndex('pf-index');
   var tee = validTeeColor(val('pf-tee') || 'jaune');
   if (!pr) { toast('Entre ton prénom'); return; }
+  if (ix === null) return;
   S.player = Object.assign({}, S.player, { prenom: pr, nom: no, index: ix, teeColor: tee });
   lset('tb_player', S.player); updatePlayerUI(); fillProfilForm();
   syncPlayerProfileToGame();
@@ -513,7 +562,7 @@ function updatePlayerUI() {
   if (!S.player) return;
   setAvatar('hb-av', S.player, 'rgba(255,255,255,.3)');
   txt('hb-nom', fullname(S.player).toUpperCase());
-  txt('hb-idx', S.player.index || '—');
+  txt('hb-idx', formatGolfIndex(S.player.index));
   setAvatar('g-av', S.player, 'var(--green)');
   txt('g-name', S.player.prenom.toUpperCase());
 }
@@ -536,10 +585,11 @@ function onCourseChange(id) { selCourse = id; }
 function showAddPlayer() { document.getElementById('form-add').style.display = 'block'; document.getElementById('add-prenom').focus(); }
 function hideAddPlayer() { document.getElementById('form-add').style.display = 'none'; }
 function addPlayer() {
-  var pr = trim('add-prenom'), ix = parseFloat(val('add-index')) || 0;
+  var pr = trim('add-prenom'), ix = readGolfIndex('add-index');
   if (!pr) { toast('Entre un prénom'); return; }
+  if (ix === null) return;
   S.extras.push({ prenom: pr, index: ix, teeColor: validTeeColor(S.player && S.player.teeColor), id: 'x' + Date.now(), pid: 'x_' + Date.now() + '_' + Math.random().toString(36).slice(2, 5) });
-  setv('add-prenom', ''); setv('add-index', '');
+  setv('add-prenom', ''); setv('add-index', ''); setIndexButtonState(document.getElementById('add-index'));
   hideAddPlayer(); renderPlayerList();
 }
 function removePlayerExtra(id) { S.extras = S.extras.filter(function (j) { return j.id !== id; }); renderPlayerList(); }
@@ -552,7 +602,7 @@ function renderPlayerList() {
     d.style.cssText = 'display:flex;align-items:center;gap:10px;padding:12px 14px;background:#fff;border-radius:14px;';
     d.innerHTML = avatarHTML(j, 34) +
       '<div style="flex:1;font-family:\'Barlow Condensed\',sans-serif;font-weight:700;font-size:15px;text-transform:uppercase;">' + fullname(j) + '</div>' +
-      '<div style="font-size:12px;color:var(--muted);">Idx ' + j.index + ' · ' + teeLabel(j.teeColor) + '</div>' +
+      '<div style="font-size:12px;color:var(--muted);">Idx ' + formatGolfIndex(j.index) + ' · ' + teeLabel(j.teeColor) + '</div>' +
       (j.self ? '<span style="font-size:11px;color:var(--green);font-family:\'Barlow Condensed\',sans-serif;font-weight:700;flex-shrink:0;">MOI</span>'
               : '<button onclick="removePlayerExtra(\'' + j.id + '\')" class="x-btn">×</button>');
     el.appendChild(d);
@@ -663,6 +713,45 @@ function attachOpenGamesListener() {
     renderOpenGames(games);
   }, function (err) { console.error('open games', err); });
 }
+function timestampMillis(ts) {
+  if (!ts) return null;
+  if (typeof ts.toMillis === 'function') return ts.toMillis();
+  if (typeof ts.seconds === 'number') return ts.seconds * 1000;
+  return null;
+}
+/* Nettoyage automatique déclenché par les applications ouvertes. */
+function purgeInactiveGames() {
+  if (!FB_OK) return Promise.resolve(0);
+  var cutoff = Date.now() - INACTIVE_GAME_HOURS * 60 * 60 * 1000;
+  return DB.collection('games').get().then(function (snap) {
+    var deletions = [];
+    snap.forEach(function (doc) {
+      if (doc.id === S.gameId) return;
+      var data = doc.data(), last = timestampMillis(data.updatedAt || data.createdAt);
+      if (last !== null && last < cutoff) deletions.push(DB.collection('games').doc(doc.id).delete());
+    });
+    return Promise.all(deletions).then(function () { return deletions.length; });
+  }).catch(function (e) { console.error('automatic cleanup', e); return 0; });
+}
+function scheduleInactiveGameCleanup() {
+  if (S.cleanupTimer) clearInterval(S.cleanupTimer);
+  setTimeout(purgeInactiveGames, 5000);
+  S.cleanupTimer = setInterval(purgeInactiveGames, CLEANUP_INTERVAL_MS);
+}
+function touchGameActivity(id) {
+  if (!FB_OK || !id || S.spectating || S.gameId !== id) return;
+  DB.collection('games').doc(id).update({ updatedAt: firebase.firestore.FieldValue.serverTimestamp() }).catch(function () {});
+}
+function startActivityHeartbeat(id) {
+  if (S.spectating || !id) { stopActivityHeartbeat(); return; }
+  if (S.activityTimer && S.activityGameId === id) return;
+  stopActivityHeartbeat(); S.activityGameId = id; touchGameActivity(id);
+  S.activityTimer = setInterval(function () { touchGameActivity(id); }, ACTIVITY_HEARTBEAT_MS);
+}
+function stopActivityHeartbeat() {
+  if (S.activityTimer) clearInterval(S.activityTimer);
+  S.activityTimer = null; S.activityGameId = null;
+}
 function refreshOpenGames() { if (S._openGames) renderOpenGames(S._openGames); }
 function renderOpenGames(games) {
   var box = document.getElementById('open-games');
@@ -733,6 +822,7 @@ function gateThen(g, cb) {
 /* ── Listener : partie en cours ────────────────────────────────────────── */
 function attachGameListener(id) {
   if (S.unsub) S.unsub();
+  if (S.spectating) stopActivityHeartbeat(); else startActivityHeartbeat(id);
   S.unsub = DB.collection('games').doc(id).onSnapshot(function (snap) {
     if (!snap.exists) {
       if (S.gameId === id) {
@@ -808,7 +898,7 @@ function renderSalon() {
     d.style.cssText = 'display:flex;align-items:center;gap:10px;padding:12px 14px;background:#fff;border-radius:14px;box-shadow:0 1px 6px rgba(0,0,0,.05);' + (me ? 'border:2px solid var(--green);' : '');
     d.innerHTML = avatarHTML(j, 34, 'var(--green)') +
       '<div style="font-family:\'Barlow Condensed\',sans-serif;font-weight:700;font-size:15px;text-transform:uppercase;color:var(--text);">' + j.prenom + crown + (me ? ' <span style="font-size:11px;color:var(--green);">(moi)</span>' : '') + '</div>' +
-      '<div style="margin-left:auto;font-size:12px;color:var(--muted);">Index ' + j.index + ' · ' + teeLabel(j.teeColor) + '</div>' +
+      '<div style="margin-left:auto;font-size:12px;color:var(--muted);">Index ' + formatGolfIndex(j.index) + ' · ' + teeLabel(j.teeColor) + '</div>' +
       (canKick ? '<button class="x-btn" title="Retirer" style="margin-left:8px;" onclick="kickPlayer(\'' + j.pid + '\',\'' + esc(j.prenom).replace(/'/g, "\\'") + '\')">×</button>' : '');
     jl.appendChild(d);
   });
@@ -1144,7 +1234,8 @@ function refreshGameUI() {
     var u = (S.editable || []).find(function (x) { return x.key === S.activeKey; });
     var st = 0;
     if (u && u.player && gameHcp()) { st = strokesArray(u.player.index, u.player)[t] || 0; }
-    if (st > 0) { gs.style.display = 'inline'; gs.textContent = '· ' + (st >= 2 ? st + ' coups rendus' : '1 coup rendu') + ' ⛳'; }
+    if (st > 0) { gs.style.display = 'inline'; gs.textContent = '· ' + (st >= 2 ? st + ' coups reçus' : '1 coup reçu') + ' ⛳'; }
+    else if (st < 0) { gs.style.display = 'inline'; gs.textContent = '· ' + (st <= -2 ? Math.abs(st) + ' coups à rendre' : '1 coup à rendre') + ' ⛳'; }
     else gs.style.display = 'none';
   }
   var sEl = document.getElementById('g-score'), lEl = document.getElementById('g-slabel'), eEl = document.getElementById('g-ecart');
@@ -1391,7 +1482,7 @@ function buildScoreEntities() {
   var ents = units.map(function (u) {
     var editable = u.players.some(function (p) { return S.myPids.indexOf(p.pid) >= 0; }) && !S.spectating;
     var scores = (editable && S.local[u.key]) ? S.local[u.key] : getScores(u.key);
-    var sub = u.type === 'team' ? 'Équipe' : ('Index ' + (u.player ? u.player.index : '—') + ' · ' + teeLabel(u.player && u.player.teeColor));
+    var sub = u.type === 'team' ? 'Équipe' : ('Index ' + (u.player ? formatGolfIndex(u.player.index) : '—') + ' · ' + teeLabel(u.player && u.player.teeColor));
     var hasHost = u.players.some(function (p) { return p.pid === S.game.host; });
     return { label: u.label, sub: sub, p: u.p, scores: scores, key: u.key, editable: editable, me: editable, type: u.type, removable: isHostDevice && !hasHost, player: u.player };
   });
@@ -1467,22 +1558,24 @@ function scoreCard(en, rank, pars) {
   var cv0 = gCroixVal();
   function std(s, par, holeIdx) {
     var st = strokes[holeIdx] || 0;
-    var dots = st > 0 ? '<span style="color:var(--green);font-size:8px;vertical-align:super;letter-spacing:-1px;">' + (st >= 2 ? '••' : '•') + '</span>' : '';
+    var marks = '';
+    if (st > 0) marks = '<span title="Coup reçu" style="color:var(--green);font-size:8px;vertical-align:super;letter-spacing:-1px;">' + '•'.repeat(st) + '</span>';
+    else if (st < 0) marks = '<span title="Coup rendu" style="color:var(--orange);font-size:9px;vertical-align:super;letter-spacing:-1px;">' + '−'.repeat(Math.abs(st)) + '</span>';
     // Stableford : on affiche les points du trou
     if (en.stableford) {
       var pts = holeStableford(s, par, st, cv0);
-      if (pts === null) return '<td style="color:#ccc;font-size:12px;">·' + dots + '</td>';
+      if (pts === null) return '<td style="color:#ccc;font-size:12px;">·' + marks + '</td>';
       var pc = pts === 0 ? 'var(--red)' : (pts === 1 ? 'var(--orange)' : (pts === 2 ? 'var(--text)' : 'var(--green)'));
       var pf = pts >= 3 ? '900' : '700';
-      return '<td style="color:' + pc + ';font-weight:' + pf + ';">' + pts + dots + '</td>';
+      return '<td style="color:' + pc + ';font-weight:' + pf + ';">' + pts + marks + '</td>';
     }
-    if (s === null || s === undefined) return '<td style="color:#ccc;font-size:12px;">·' + dots + '</td>';
-    if (s === 'X') return '<td style="color:var(--red);font-weight:900;">✕' + dots + '</td>';
+    if (s === null || s === undefined) return '<td style="color:#ccc;font-size:12px;">·' + marks + '</td>';
+    if (s === 'X') return '<td style="color:var(--red);font-weight:900;">✕' + marks + '</td>';
     var shown = showNet ? (s - st) : s;
     var e = shown - par, c = 'var(--text)', fw = '700';
     if (e <= -2) c = 'var(--gold)'; else if (e === -1) { c = 'var(--green)'; fw = '900'; }
     else if (e === 1) c = 'var(--orange)'; else if (e >= 2) { c = 'var(--red)'; fw = '900'; }
-    return '<td style="color:' + c + ';font-weight:' + fw + ';">' + shown + dots + '</td>';
+    return '<td style="color:' + c + ';font-weight:' + fw + ';">' + shown + marks + '</td>';
   }
   var al = en.scores.slice(0, 9), ret = en.scores.slice(9, 18);
   var pAl = pars.slice(0, 9).reduce(function (a, b) { return a + b; }, 0), pRet = pars.slice(9, 18).reduce(function (a, b) { return a + b; }, 0);
@@ -1620,7 +1713,7 @@ function leaveAndMaybeDelete(done) {
 function backHome() { confirmEnd(); }
 function clearSessionLocal() {
   if (S.unsub) { S.unsub(); S.unsub = null; }
-  stopHeartbeat();
+  stopHeartbeat(); stopActivityHeartbeat();
   closeSheet();
   S.game = null; S.gameId = null; S.hole = 0; S.started = false; S.spectating = false;
   S.myPids = []; S.editable = []; S.activeKey = null; S.local = {}; S.writeTs = {};

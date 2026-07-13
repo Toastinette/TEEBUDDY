@@ -147,6 +147,7 @@
   }
 
   function esc(s){ return String(s==null?'':s).replace(/[&<>"]/g,function(c){return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c];}); }
+  function fmtIndex(v){ var n=Number(v); return isFinite(n)&&n<0?'+'+Math.abs(n):String(v==null?'—':v); }
   function fmtDate(ts){ if(!ts||!ts.seconds) return '—'; var d=new Date(ts.seconds*1000); return d.toLocaleString('fr-FR'); }
   function hoursSince(ts){ if(!ts||!ts.seconds) return Infinity; return (Date.now()/1000 - ts.seconds)/3600; }
 
@@ -161,7 +162,7 @@
       snap.forEach(function(doc){ var d=doc.data(); d._id=doc.id; games.push(d); });
       games.sort(function(a,b){ return (b.updatedAt&&b.updatedAt.seconds||0)-(a.updatedAt&&a.updatedAt.seconds||0); });
       games.forEach(function(g){
-        var players=(g.players||[]).map(function(p){return '<span class="pill">'+esc(p.prenom)+' · idx '+p.index+(p.pid===g.host?' 👑':'')+'</span>';}).join('');
+        var players=(g.players||[]).map(function(p){return '<span class="pill">'+esc(p.prenom)+' · idx '+fmtIndex(p.index)+(p.pid===g.host?' 👑':'')+'</span>';}).join('');
         var badge=g.status==='playing'?'<span class="badge live">en cours</span>':'<span class="badge lobby">salon</span>';
         // Mini résumé des scores
         var nbScored=0;
@@ -410,6 +411,8 @@
   }
 
   loadGames();
+  purgeOld();
+  setInterval(purgeOld, 15*60*1000);
   loadSettings();
   buildParInputs();
   loadCourses();
