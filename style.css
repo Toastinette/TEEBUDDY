@@ -260,6 +260,67 @@ body {
 .hint { padding: 14px 16px; background: rgba(46,204,113,.08); border-radius: 14px; font-size: 13px; color: var(--muted); line-height: 1.5; }
 .spacer-44 { width: 44px; }
 
+/* ── Formule Syndicat ─────────────────────────────────────────────────── */
+.syndicat-config { display:none; }
+.syndicat-config-card {
+  background:#fff; border:2px solid rgba(184,150,12,.28); border-radius:var(--rc);
+  padding:18px; box-shadow:0 2px 14px rgba(0,0,0,.06);
+}
+.syndicat-stake-input { display:flex; align-items:center; gap:10px; margin:12px 0 8px; }
+.syndicat-stake-input .inp { text-align:center; font-size:22px; padding:12px 14px; }
+.syndicat-euro { font-family:'Barlow Condensed',sans-serif; font-size:25px; font-weight:900; }
+.syndicat-rule-link {
+  border:none; background:none; color:var(--gold); padding:5px 0; cursor:pointer;
+  font-family:'Barlow Condensed',sans-serif; font-size:13px; font-weight:800;
+  text-transform:uppercase; letter-spacing:.05em;
+}
+.syndicat-stake-card {
+  background:#171717; color:#fff; border-radius:18px; padding:14px 16px;
+  box-shadow:0 5px 18px rgba(0,0,0,.14);
+}
+.syndicat-stake-main { display:flex; justify-content:space-between; align-items:flex-end; gap:12px; }
+.syndicat-stake-value { font-family:'Barlow Condensed',sans-serif; font-size:34px; line-height:1; font-weight:900; color:#F4D35E; }
+.syndicat-breakdown { margin-top:9px; padding-top:9px; border-top:1px solid rgba(255,255,255,.16); font-size:11px; color:rgba(255,255,255,.72); line-height:1.55; }
+.syndicat-joker {
+  margin-top:10px; padding:11px 13px; border-radius:14px; background:rgba(244,211,94,.13);
+  color:#F4D35E; font-size:12px; line-height:1.4;
+}
+.syndicat-joker-btn {
+  width:100%; margin-top:10px; border:2px solid #F4D35E; border-radius:30px;
+  padding:10px 14px; background:transparent; color:#F4D35E; cursor:pointer;
+  font-family:'Barlow Condensed',sans-serif; font-size:13px; font-weight:900;
+  text-transform:uppercase; letter-spacing:.05em;
+}
+.syndicat-joker-btn:disabled { opacity:.42; cursor:default; }
+.syndicat-score-recap { margin-top:10px; padding:8px 12px; border-radius:14px; background:rgba(255,255,255,.08); }
+.syndicat-score-recap > div { display:flex; justify-content:space-between; gap:12px; padding:4px 0; font-size:11px; }
+.syndicat-score-recap strong { color:#fff; text-align:right; }
+.syndicat-validate { margin-top:10px; }
+.syndicat-balance-row { display:flex; align-items:center; justify-content:space-between; gap:12px; padding:9px 0; border-bottom:1px solid var(--border); }
+.syndicat-balance-row:last-child { border-bottom:none; }
+.syndicat-money { font-family:'Barlow Condensed',sans-serif; font-size:21px; font-weight:900; white-space:nowrap; }
+.syndicat-money.positive { color:var(--green); }
+.syndicat-money.negative { color:var(--red); }
+.syndicat-money.neutral { color:var(--muted); }
+.syndicat-hole-card { cursor:pointer; border-left:4px solid var(--gold); }
+.syndicat-modal {
+  display:none; position:fixed; inset:0; z-index:12000; background:rgba(0,0,0,.58);
+  align-items:flex-end; justify-content:center;
+}
+.syndicat-modal.open { display:flex; }
+.syndicat-modal-card {
+  width:100%; max-width:540px; max-height:88vh; overflow-y:auto; background:#fff;
+  border-radius:26px 26px 0 0; padding:24px 20px calc(24px + env(safe-area-inset-bottom));
+}
+.syndicat-rules-list { display:flex; flex-direction:column; gap:10px; font-size:14px; color:var(--muted); line-height:1.45; }
+.syndicat-result-card { max-height:92vh; }
+.syndicat-result-stake { display:flex; flex-direction:column; gap:5px; margin:-6px 0 12px; padding:11px 14px; border-radius:14px; background:rgba(184,150,12,.09); font-size:12px; color:var(--muted); }
+.syndicat-result-stake span { display:flex; justify-content:space-between; gap:12px; }
+.syndicat-result-stake strong { color:var(--text); }
+.syndicat-tx { padding:10px 0; border-bottom:1px solid var(--border); }
+.syndicat-tx:last-child { border-bottom:none; }
+.syndicat-detail { margin-top:4px; font-size:11px; color:var(--muted); line-height:1.4; }
+
 /* ── Footer Powered by Hook & Slice (sur tous les écrans) ──────────────── */
 .footer {
   margin-top: auto;

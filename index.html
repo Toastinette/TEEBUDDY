@@ -193,6 +193,7 @@
         <div id="sl-mode-buttons" style="display:flex;flex-direction:column;gap:8px;"></div>
         <div id="sl-mode-hint" style="display:none;margin-top:8px;font-size:12px;color:var(--muted);">⏳ Seul l'hôte peut choisir le mode.</div>
       </div>
+      <div id="sl-syndicat-config" class="syndicat-config"></div>
       <div id="sl-equipes-wrap" style="display:none;">
         <div class="L" style="margin-bottom:6px;">Équipes</div>
         <div id="sl-equipes-note" style="font-size:12px;color:var(--muted);margin-bottom:12px;line-height:1.4;"></div>
@@ -219,13 +220,14 @@
       </div>
     </div>
     <div id="g-unitbar" style="display:none;gap:8px;overflow-x:auto;padding:6px 20px 0;background:var(--bg);scrollbar-width:none;-webkit-overflow-scrolling:touch;"></div>
-    <div style="background:var(--bg);padding:6px 20px 0;display:flex;align-items:center;justify-content:center;gap:10px;">
+    <div id="g-depart-controls" style="background:var(--bg);padding:6px 20px 0;display:flex;align-items:center;justify-content:center;gap:10px;">
       <label style="font-family:'Barlow Condensed',sans-serif;font-weight:700;font-size:13px;color:var(--muted);text-transform:uppercase;letter-spacing:.05em;">Départ :</label>
       <input id="g-depart" type="number" min="1" max="20" inputmode="numeric" placeholder="–" onchange="saveDepart()" style="width:54px;text-align:center;border:2px solid var(--border);border-radius:12px;padding:5px;font-family:'Barlow Condensed',sans-serif;font-weight:700;font-size:15px;background:#fff;">
       <button id="g-df-btn" onclick="openDF()" title="Lancer un vote DF" style="background:#fff;border:2px solid var(--border);border-radius:20px;padding:5px 14px;font-family:'Barlow Condensed',sans-serif;font-weight:800;font-size:12px;color:var(--orange);cursor:pointer;-webkit-tap-highlight-color:transparent;letter-spacing:.05em;">DF ⛳</button>
     </div>
     <div id="g-vote" style="display:none;padding:8px 20px 0;"></div>
     <div style="background:var(--bg);padding:6px 0 8px;"><div class="holes-row" id="g-holes"></div></div>
+    <div id="g-syndicat" style="display:none;padding:4px 20px 0;"></div>
     <div style="flex:1;display:flex;flex-direction:column;align-items:center;justify-content:center;padding:8px 24px;">
       <div id="g-msg"></div>
       <div class="L" style="margin-bottom:6px;">Trou <span id="g-hn">1</span> · Par <span id="g-par">4</span><span id="g-stroke" style="display:none;color:var(--green);margin-left:8px;"></span></div>
@@ -306,6 +308,7 @@
           <div id="set-mode-buttons" style="display:flex;flex-direction:column;gap:8px;"></div>
           <div class="hint" style="margin-top:10px;">⚠️ Changer de mode en cours de partie reforme les équipes mais conserve les scores déjà saisis.</div>
         </div>
+        <div id="set-syndicat-config" class="syndicat-config"></div>
         <div id="set-equipes-wrap" style="display:none;">
           <div class="L" style="margin-bottom:12px;">Équipes</div>
           <div id="set-equipes" style="display:flex;flex-direction:column;gap:10px;margin-bottom:12px;"></div>
@@ -369,6 +372,30 @@
   </div>
 </div>
 
+<!-- Règles rapides du Syndicat -->
+<div id="syndicat-rules" class="syndicat-modal" onclick="if(event.target===this)closeSyndicatRules()">
+  <div class="syndicat-modal-card">
+    <div class="D" style="font-size:24px;margin-bottom:12px;">Règles du Syndicat</div>
+    <div class="syndicat-rules-list">
+      <div>Chaque joueur paie ceux qui réalisent un meilleur score brut.</div>
+      <div><strong>Birdie ou mieux :</strong> paiement ×2.</div>
+      <div><strong>Triple bogey :</strong> pénalité supplémentaire ×2 aux vainqueurs.</div>
+      <div><strong>Égalité générale :</strong> la mise est reportée et les reports se cumulent.</div>
+      <div><strong>Joker :</strong> un par joueur, un seul par trou, tous les montants ×2.</div>
+      <div>Une croix ou un score supérieur compte comme triple bogey.</div>
+    </div>
+    <button class="btn B-dark" onclick="closeSyndicatRules()" style="margin-top:18px;">J'ai compris</button>
+  </div>
+</div>
+
+<!-- Résultat détaillé d'un trou Syndicat -->
+<div id="syndicat-result" class="syndicat-modal" onclick="if(event.target===this)closeSyndicatResult()">
+  <div class="syndicat-modal-card syndicat-result-card">
+    <div id="syndicat-result-content"></div>
+    <button class="btn B-dark" onclick="closeSyndicatResult()" style="margin-top:18px;">Fermer</button>
+  </div>
+</div>
+
 <!-- Firebase compat (scripts classiques — fiables sur GitHub Pages) -->
 <script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-app-compat.js"></script>
 <script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-firestore-compat.js"></script>
@@ -377,6 +404,8 @@
 
 <!-- Nos fichiers -->
 <script src="config.js"></script>
+<script src="syndicat.js"></script>
+<script src="syndicat-ui.js"></script>
 <script src="app.js"></script>
 </body>
 </html>

@@ -678,6 +678,10 @@ function joinGameById(id) {
     var data = snap.data();
     var myPid = S.player.pid;
     var inGame = data.players.some(function (p) { return p.pid === myPid; });
+    if (!inGame && data.mode === 'syndicat' && data.status === 'playing') {
+      toast('La liste des joueurs Syndicat est verrouillée après le lancement');
+      return;
+    }
     var chain = Promise.resolve();
     if (!inGame) {
       var me = { prenom: S.player.prenom, nom: S.player.nom || '', index: S.player.index, teeColor: validTeeColor(S.player.teeColor), pid: myPid };
@@ -906,6 +910,7 @@ function renderSalon() {
 
   renderModeButtons('sl-mode-buttons', isHost);
   document.getElementById('sl-mode-hint').style.display = isHost ? 'none' : 'block';
+  renderSyndicatConfig('sl-syndicat-config');
 
   var ew = document.getElementById('sl-equipes-wrap');
   var showTeams = MODES[g.mode].teams || MODES[g.mode].matchplay;
@@ -1072,8 +1077,19 @@ function freePlayers() {
 function changeMode(m) {
   if (!FB_OK || !S.game) return;
   if (S.game.host !== S.player.pid) { toast('Seul l\'hôte peut changer le mode'); return; }
+  if (S.game.status === 'playing' && (S.game.mode === 'syndicat' || m === 'syndicat')) {
+    toast('Le mode Syndicat ne peut pas être activé ou quitté après le lancement');
+    return;
+  }
   // Changement de mode : on repart de joueurs libres (à répartir à la main ou via le bouton équilibrer)
   var upd = { mode: m, teams: [], updatedAt: firebase.firestore.FieldValue.serverTimestamp() };
+  if (m === 'syndicat' && !S.game.syndicatSettings) {
+    upd.syndicatSettings = { baseStakeCents: 200, maxScoreRelativeToPar: 3, birdieMultiplier: 2, tripleBogeyPenaltyMultiplier: 2, jokerMultiplier: 2, jokerPerPlayer: 1, grossScoreOnly: true };
+    upd.syndicatStakeSchedule = { 0: 200 };
+    upd.syndicatJokers = {};
+    upd.syndicatJokerUsed = {};
+    upd.syndicatValidated = {};
+  }
   DB.collection('games').doc(S.gameId).update(upd);
 }
 /* Répartition équilibrée : on appaire le meilleur index avec le moins bon,
@@ -1093,6 +1109,7 @@ function autoTeams(players) {
 /* L'hôte retire un ou plusieurs joueurs (et les clés de score associées) */
 function kickPids(pids, extraScoreKeys, label) {
   if (!FB_OK || !S.game) return;
+  if (isSyndicat() && S.game.status === 'playing') { toast('Les joueurs sont verrouillés pendant une partie Syndicat'); return; }
   if (S.game.host !== S.player.pid) { toast('Seul l\'hôte peut retirer un joueur'); return; }
   var remaining = (S.game.players || []).filter(function (p) { return pids.indexOf(p.pid) < 0; });
   if (remaining.length === 0) {
@@ -1139,6 +1156,11 @@ function launchGame() {
   if (!FB_OK || !S.game) return;
   if (S.game.host !== S.player.pid) { toast('Seul l\'hôte peut lancer'); return; }
   var mode = MODES[S.game.mode] || {};
+  if (mode.syndicat) {
+    if ((S.game.players || []).length < 2) { toast('Le Syndicat nécessite au moins 2 joueurs'); return; }
+    var rawStake = Number((S.game.syndicatSettings || {}).baseStakeCents);
+    if (!isFinite(rawStake) || rawStake <= 0 || rawStake % 100 !== 0) { toast('Choisis une mise entière en euros'); return; }
+  }
   if (mode.matchplay) {
     if (teamBased(S.game)) {
       if (freePlayers().length > 0) { toast('Glisse chaque joueur dans une équipe'); return; }
@@ -1164,6 +1186,7 @@ function renderSettings() {
   document.getElementById('set-not-host').style.display = isHost ? 'none' : 'block';
   if (isHost) {
     renderModeButtons('set-mode-buttons', true);
+    renderSyndicatConfig('set-syndicat-config');
     var ew = document.getElementById('set-equipes-wrap');
     if (MODES[g.mode].teams || MODES[g.mode].matchplay) { ew.style.display = 'block'; renderTeams('set-equipes', isHost); }
     else ew.style.display = 'none';
@@ -1233,13 +1256,14 @@ function refreshGameUI() {
   if (gs) {
     var u = (S.editable || []).find(function (x) { return x.key === S.activeKey; });
     var st = 0;
-    if (u && u.player && gameHcp()) { st = strokesArray(u.player.index, u.player)[t] || 0; }
+    if (!isSyndicat() && u && u.player && gameHcp()) { st = strokesArray(u.player.index, u.player)[t] || 0; }
     if (st > 0) { gs.style.display = 'inline'; gs.textContent = '· ' + (st >= 2 ? st + ' coups reçus' : '1 coup reçu') + ' ⛳'; }
     else if (st < 0) { gs.style.display = 'inline'; gs.textContent = '· ' + (st <= -2 ? Math.abs(st) + ' coups à rendre' : '1 coup à rendre') + ' ⛳'; }
     else gs.style.display = 'none';
   }
   var sEl = document.getElementById('g-score'), lEl = document.getElementById('g-slabel'), eEl = document.getElementById('g-ecart');
   var crossBtn = document.getElementById('g-cross');
+  if (crossBtn) crossBtn.textContent = isSyndicat() ? '✕ Triple bogey maximum' : '✕ Faire une croix';
   if (sc === 'X') {
     sEl.textContent = '✕'; sEl.style.color = 'var(--red)';
     lEl.textContent = 'CROIX'; lEl.style.color = 'var(--red)';
@@ -1261,10 +1285,16 @@ function refreshGameUI() {
   buildHolePicker();
   renderUnitBar();
   // Départ du joueur actif + box de vote DF
+  var departControls = document.getElementById('g-depart-controls');
+  if (departControls) departControls.style.display = isSyndicat() ? 'none' : 'flex';
   var dEl = document.getElementById('g-depart');
   if (dEl) { var dp = (S.game.departs || {})[activePlayerPid()]; dEl.value = dp || ''; }
-  renderVoteBox();
+  if (isSyndicat()) {
+    var voteBox = document.getElementById('g-vote');
+    if (voteBox) { voteBox.style.display = 'none'; voteBox.innerHTML = ''; }
+  } else renderVoteBox();
   updateViewerDisplays();
+  renderSyndicatGamePanel();
 }
 function scoreInfo(e) {
   if (e <= -3) return { label: 'ALBATROS 🦅', color: 'var(--gold)' };
@@ -1282,17 +1312,26 @@ function activeArr() {
 }
 function chScore(d) {
   if (!S.game || !S.activeKey) return;
+  if (!prepareSyndicatScoreEdit()) return;
   var arr = activeArr(); if (!arr) return;
   var t = S.hole, par = S.game.coursePars[t], cur = arr[t];
   var nxt = (typeof cur === 'number') ? Math.max(1, cur + d) : (d > 0 ? par : Math.max(1, par - 1));
+  if (isSyndicat()) nxt = Math.min(par + 3, nxt);
   arr[t] = nxt; S.notified[t] = false;
   buzz(70); popScore();
   saveScore(); refreshGameUI();
 }
 function setCross() {
   if (!S.game || !S.activeKey) return;
+  if (!prepareSyndicatScoreEdit()) return;
   var arr = activeArr(); if (!arr) return;
   var t = S.hole;
+  if (isSyndicat()) {
+    var max = S.game.coursePars[t] + 3;
+    arr[t] = arr[t] === max ? null : max;
+    S.notified[t] = true; buzz([90, 60, 120]); popScore();
+    saveScore(); refreshGameUI(); return;
+  }
   var becomingCross = arr[t] !== 'X';
   arr[t] = becomingCross ? 'X' : null;
   S.notified[t] = true;       // pas de message birdie sur une croix
@@ -1545,6 +1584,7 @@ function refreshScores() {
   var nw = document.getElementById('sc-net-wrap');
   if (nw) nw.style.display = netAvailable() ? 'flex' : 'none';
   box.innerHTML = '';
+  if (isSyndicat()) { renderSyndicatDashboard(box); updateViewerDisplays(); return; }
   var pars = S.game.coursePars;
   buildScoreEntities().forEach(function (en, rank) { box.appendChild(scoreCard(en, rank, pars)); });
   updateViewerDisplays();
@@ -1652,7 +1692,10 @@ function endGame() {
   var isMatch = (MODES[S.game.mode] || {}).matchplay;
   var isStab = (MODES[S.game.mode] || {}).stableford;
   var body = document.getElementById('fin-body');
+  var exportBtn = document.getElementById('export-btn');
+  if (exportBtn) exportBtn.style.display = isSyndicat() ? 'none' : 'flex';
   body.innerHTML = '';
+  if (isSyndicat()) { renderSyndicatFinal(body); go('s-fin'); return; }
   // Vainqueur en tête
   var top = ents[0];
   if (top && (top.n > 0 || isMatch)) {
@@ -1676,9 +1719,11 @@ function endGame() {
 }
 /* Quand on confirme la fin : on se retire de la partie. Le dernier supprime le doc. */
 function confirmEnd() {
+  if (isSyndicat()) { clearSessionLocal(); go('s-home'); return; }
   leaveAndMaybeDelete(function () { clearSessionLocal(); go('s-home'); });
 }
 function quitGame() {
+  if (isSyndicat() && S.game.status === 'playing') { toast('Utilise « Terminer la partie » pour clôturer le Syndicat'); return; }
   if (!confirm('Quitter la partie ? Tu seras retiré de la liste des joueurs.')) return;
   leaveAndMaybeDelete(function () { clearSessionLocal(); go('s-home'); });
 }
@@ -1717,7 +1762,7 @@ function clearSessionLocal() {
   closeSheet();
   S.game = null; S.gameId = null; S.hole = 0; S.started = false; S.spectating = false;
   S.myPids = []; S.editable = []; S.activeKey = null; S.local = {}; S.writeTs = {};
-  S.extras = []; S.notified = {};
+  S.extras = []; S.notified = {}; S.syndicatEditConfirmed = {};
   localStorage.removeItem('tb_session');
   renderPlayerList(); renderHomeParties();
 }
@@ -1894,6 +1939,7 @@ function renderSheet() {
   if (b) b.className = 'net-toggle' + (S.netView ? '' : ' active');
   if (n) n.className = 'net-toggle' + (S.netView ? ' active' : '');
   box.innerHTML = '';
+  if (isSyndicat()) { renderSyndicatDashboard(box); return; }
   var pars = S.game.coursePars;
   buildScoreEntities().forEach(function (en, rank) {
     var card = scoreCard(en, rank, pars);

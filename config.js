@@ -39,6 +39,7 @@ window.COURSES = [
 window.MODES = {
   stroke:     { label: 'Stroke Play',            teams: false, icon: '🏌️' },
   stableford: { label: 'Stableford',             teams: false, icon: '🎯', stableford: true },
+  syndicat:   { label: 'Syndicat',               teams: false, icon: '💶', syndicat: true },
   scramble:   { label: 'Scramble',               teams: true,  icon: '🤝' },
   mmb:        { label: 'Meilleure moins bonne',  teams: true,  icon: '⭐' },
   matchplay:  { label: 'Match Play',             teams: false, icon: '⚔️', matchplay: true }
