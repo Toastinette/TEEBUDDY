@@ -46,7 +46,9 @@ var S = {
   settings: { vibration: true },
   activityTimer: null,
   activityGameId: null,
-  cleanupTimer: null
+  cleanupTimer: null,
+  syndicatEditConfirmed: {},
+  syndicatConfirmPending: false
 };
 var INACTIVE_GAME_HOURS = 6;
 var ACTIVITY_HEARTBEAT_MS = 5 * 60 * 1000;
@@ -838,7 +840,13 @@ function attachGameListener(id) {
       }
       return;
     }
+    var previousGame = S.game;
     S.game = snap.data();
+    var newlyValidatedSyndicatHole = syndicatNewlyValidatedHole(previousGame, S.game);
+    if (newlyValidatedSyndicatHole >= 0 && S.started && newlyValidatedSyndicatHole < 17) {
+      S.hole = newlyValidatedSyndicatHole + 1;
+      lset('tb_session', { id: S.gameId, hole: S.hole, myPids: S.myPids });
+    }
     pulseLive();
     // Détecter si on a été retiré de la partie par l'hôte
     if (!S.spectating && S.myPids.length && (S.game.players || []).length &&
@@ -872,6 +880,10 @@ function attachGameListener(id) {
     if (isActive('s-settings')) renderSettings();
     if (isActive('s-game'))     { updateSheetDock('s-game'); refreshGameUI(); }
     if (S.sheetOpen) renderSheet();
+    if (newlyValidatedSyndicatHole >= 0 && S.started) {
+      openSyndicatResult(newlyValidatedSyndicatHole);
+      toast('Tous les scores sont validés · trou ' + (newlyValidatedSyndicatHole + 1), true);
+    }
   }, function (err) { console.error('game', err); });
 }
 function isActive(id) { var e = document.getElementById(id); return e && e.classList.contains('active'); }
@@ -1088,6 +1100,7 @@ function changeMode(m) {
     upd.syndicatStakeSchedule = { 0: 200 };
     upd.syndicatJokers = {};
     upd.syndicatJokerUsed = {};
+    upd.syndicatScoreConfirmations = {};
     upd.syndicatValidated = {};
   }
   DB.collection('games').doc(S.gameId).update(upd);
@@ -1237,11 +1250,13 @@ function updateGameHeader() {
 function buildHolePicker() {
   var el = document.getElementById('g-holes'); if (!el) return; el.innerHTML = '';
   var sc = getScores(S.activeKey);
+  var firstOpenSyndicatHole = isSyndicat() ? syndicatFirstOpenHole(S.game) : 17;
   for (var i = 0; i < 18; i++) {
     var c = document.createElement('button');
     c.className = 'hc' + (i === S.hole ? ' active' : '') + (sc[i] !== null && sc[i] !== undefined ? ' done' : '');
     c.textContent = i + 1;
-    (function (idx) { c.onclick = function () { leaveHole(); S.hole = idx; refreshGameUI(); }; })(i);
+    if (isSyndicat() && i > firstOpenSyndicatHole) c.disabled = true;
+    else (function (idx) { c.onclick = function () { leaveHole(); S.hole = idx; refreshGameUI(); }; })(i);
     el.appendChild(c);
   }
 }
@@ -1263,7 +1278,10 @@ function refreshGameUI() {
   }
   var sEl = document.getElementById('g-score'), lEl = document.getElementById('g-slabel'), eEl = document.getElementById('g-ecart');
   var crossBtn = document.getElementById('g-cross');
-  if (crossBtn) crossBtn.textContent = isSyndicat() ? '✕ Triple bogey maximum' : '✕ Faire une croix';
+  if (crossBtn) {
+    crossBtn.style.display = isSyndicat() ? 'none' : 'inline-block';
+    crossBtn.textContent = '✕ Faire une croix';
+  }
   if (sc === 'X') {
     sEl.textContent = '✕'; sEl.style.color = 'var(--red)';
     lEl.textContent = 'CROIX'; lEl.style.color = 'var(--red)';
@@ -1281,7 +1299,10 @@ function refreshGameUI() {
     eEl.style.color = e <= 0 ? 'var(--green)' : 'var(--red)';
     if (crossBtn) crossBtn.classList.remove('active');
   }
-  var pv = document.getElementById('g-prev'); if (pv) pv.style.opacity = t === 0 ? '.4' : '1';
+  var pv = document.getElementById('g-prev'), nx = document.getElementById('g-next');
+  if (pv) { pv.style.display = isSyndicat() ? 'none' : 'flex'; pv.style.opacity = t === 0 ? '.4' : '1'; }
+  if (nx) nx.style.display = isSyndicat() ? 'none' : 'flex';
+  renderSyndicatConfirmButton();
   buildHolePicker();
   renderUnitBar();
   // Départ du joueur actif + box de vote DF
@@ -1762,7 +1783,7 @@ function clearSessionLocal() {
   closeSheet();
   S.game = null; S.gameId = null; S.hole = 0; S.started = false; S.spectating = false;
   S.myPids = []; S.editable = []; S.activeKey = null; S.local = {}; S.writeTs = {};
-  S.extras = []; S.notified = {}; S.syndicatEditConfirmed = {};
+  S.extras = []; S.notified = {}; S.syndicatEditConfirmed = {}; S.syndicatConfirmPending = false;
   localStorage.removeItem('tb_session');
   renderPlayerList(); renderHomeParties();
 }

@@ -292,9 +292,8 @@ body {
   text-transform:uppercase; letter-spacing:.05em;
 }
 .syndicat-joker-btn:disabled { opacity:.42; cursor:default; }
-.syndicat-score-recap { margin-top:10px; padding:8px 12px; border-radius:14px; background:rgba(255,255,255,.08); }
-.syndicat-score-recap > div { display:flex; justify-content:space-between; gap:12px; padding:4px 0; font-size:11px; }
-.syndicat-score-recap strong { color:#fff; text-align:right; }
+.syndicat-confirm-status { margin-top:10px; padding:9px 12px; border-radius:14px; background:rgba(255,255,255,.08); color:rgba(255,255,255,.76); font-size:11px; text-align:center; }
+.syndicat-edit-score, .syndicat-result-link { width:100%; margin-top:8px; border:none; background:none; color:#F4D35E; font-family:'Barlow Condensed',sans-serif; font-size:12px; font-weight:800; text-transform:uppercase; cursor:pointer; }
 .syndicat-validate { margin-top:10px; }
 .syndicat-balance-row { display:flex; align-items:center; justify-content:space-between; gap:12px; padding:9px 0; border-bottom:1px solid var(--border); }
 .syndicat-balance-row:last-child { border-bottom:none; }
@@ -320,6 +319,8 @@ body {
 .syndicat-tx { padding:10px 0; border-bottom:1px solid var(--border); }
 .syndicat-tx:last-child { border-bottom:none; }
 .syndicat-detail { margin-top:4px; font-size:11px; color:var(--muted); line-height:1.4; }
+#g-minus:disabled, #g-plus:disabled, #g-syndicat-confirm:disabled { opacity:.45; cursor:default; }
+.hc:disabled { opacity:.28; cursor:default; }
 
 /* ── Footer Powered by Hook & Slice (sur tous les écrans) ──────────────── */
 .footer {

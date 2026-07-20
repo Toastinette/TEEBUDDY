@@ -2,6 +2,7 @@ const test = require('node:test');
 const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const path = require('node:path');
+const vm = require('node:vm');
 const S = require('../syndicat.js');
 
 function hole(scores, options = {}) {
@@ -41,18 +42,18 @@ test('birdie ou mieux double uniquement les paiements reçus par ce joueur', () 
   assert.deepEqual(transactions(result), { 'A>B': 200, 'A>C': 400, 'B>C': 400 });
 });
 
-test('la pénalité triple bogey est versée en totalité à chaque vainqueur', () => {
+test('la pénalité triple bogey remplace le paiement normal à chaque vainqueur', () => {
   const result = hole({ A: 7, B: 4, C: 4 });
-  assert.deepEqual(transactions(result), { 'A>B': 600, 'A>C': 600 });
-  assert.equal(result.balances.A.netCents, -1200);
+  assert.deepEqual(transactions(result), { 'A>B': 400, 'A>C': 400 });
+  assert.equal(result.balances.A.netCents, -800);
 });
 
-test('prime birdie et pénalité triple bogey se cumulent', () => {
+test('la pénalité remplace aussi le paiement normal lorsque le vainqueur fait birdie', () => {
   const result = hole({ A: 7, B: 4, C: 3 });
-  assert.deepEqual(transactions(result), { 'A>B': 200, 'A>C': 800, 'B>C': 400 });
-  assert.equal(result.balances.A.netCents, -1000);
+  assert.deepEqual(transactions(result), { 'A>B': 200, 'B>C': 400, 'A>C': 400 });
+  assert.equal(result.balances.A.netCents, -600);
   assert.equal(result.balances.B.netCents, -200);
-  assert.equal(result.balances.C.netCents, 1200);
+  assert.equal(result.balances.C.netCents, 800);
 });
 
 test('une égalité générale reporte la mise et une égalité au birdie la double', () => {
@@ -83,7 +84,7 @@ test('les reports consécutifs sont cumulatifs puis consommés', () => {
 test('le joker double mise, primes, pénalités et report', () => {
   const result = hole({ A: 7, B: 3 }, { stake: 200, carry: 400, joker: { playerId: 'B' } });
   assert.equal(result.finalStakeCents, 1200);
-  assert.equal(transactions(result)['A>B'], 4800);
+  assert.equal(transactions(result)['A>B'], 2400);
   const tie = hole({ A: 4, B: 4 }, { stake: 200, carry: 200, joker: { playerId: 'A' } });
   assert.equal(tie.generatedCarryCents, 800);
 });
@@ -169,9 +170,52 @@ test('le mode Syndicat est raccordé à l’interface avec une mise entière', (
   const ui = fs.readFileSync(path.join(root, 'syndicat-ui.js'), 'utf8');
   assert.match(config, /syndicat:\s*\{[^\n]+label:\s*'Syndicat'/);
   assert.match(html, /id="sl-syndicat-config"/);
+  assert.match(html, /id="g-syndicat-confirm"[^>]+confirmSyndicatScore/);
+  assert.match(html, /id="g-prev"/);
+  assert.match(html, /id="g-next"/);
   assert.match(html, /src="syndicat\.js"[\s\S]+src="syndicat-ui\.js"[\s\S]+src="app\.js"/);
   assert.match(ui, /type="number" min="1" step="1" inputmode="numeric"/);
   assert.match(app, /baseStakeCents:\s*200/);
   assert.match(app, /renderSyndicatGamePanel\(\)/);
   assert.match(app, /renderSyndicatFinal\(body\)/);
+  assert.match(app, /syndicatNewlyValidatedHole/);
+  assert.match(app, /openSyndicatResult\(newlyValidatedSyndicatHole\)/);
+});
+
+test('la dernière confirmation individuelle valide automatiquement le trou', async () => {
+  const game = {
+    mode: 'syndicat', host: 'A', coursePars: Array(18).fill(4),
+    players: [{ pid: 'A', prenom: 'Alice' }, { pid: 'B', prenom: 'Bruno' }],
+    scores: { A: [4].concat(Array(17).fill(null)), B: [5].concat(Array(17).fill(null)) },
+    syndicatSettings: { baseStakeCents: 200 }, syndicatStakeSchedule: { 0: 200 },
+    syndicatJokers: {}, syndicatValidated: {},
+    syndicatScoreConfirmations: { 0: { B: { score: 5, at: 1 } } }
+  };
+  let written;
+  const context = {
+    console, window: { SYNDICAT: S }, SYNDICAT: S, FB_OK: true,
+    S: { game, gameId: 'TEST', hole: 0, player: { pid: 'A' }, spectating: false, syndicatConfirmPending: false },
+    DB: {
+      collection: () => ({ doc: () => ({}) }),
+      runTransaction: callback => callback({
+        get: () => Promise.resolve({ exists: true, data: () => game }),
+        update: (_ref, data) => { written = data; }
+      })
+    },
+    firebase: { firestore: { FieldValue: { serverTimestamp: () => 'SERVER_TIME' } } },
+    document: { getElementById: () => null },
+    getScores: pid => game.scores[pid], activePlayerPid: () => 'A',
+    toast: () => {}, confirm: () => true, esc: value => String(value)
+  };
+  vm.createContext(context);
+  vm.runInContext(fs.readFileSync(path.join(__dirname, '..', 'syndicat-ui.js'), 'utf8'), context);
+  context.confirmSyndicatScore();
+  await new Promise(resolve => setTimeout(resolve, 0));
+  assert.equal(written.syndicatScoreConfirmations['0'].A.score, 4);
+  assert.equal(written.syndicatValidated['0'].by, 'all_players');
+  assert.equal(written['scores.A'][0], 4);
+  assert.equal(context.syndicatNewlyValidatedHole(
+    { mode: 'syndicat', syndicatValidated: {} },
+    { mode: 'syndicat', syndicatValidated: { 0: { by: 'all_players' } } }
+  ), 0);
 });

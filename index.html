@@ -233,16 +233,17 @@
       <div class="L" style="margin-bottom:6px;">Trou <span id="g-hn">1</span> · Par <span id="g-par">4</span><span id="g-stroke" style="display:none;color:var(--green);margin-left:8px;"></span></div>
       <div id="g-slabel" style="font-family:'Barlow Condensed',sans-serif;font-weight:900;font-size:20px;text-transform:uppercase;letter-spacing:.1em;min-height:28px;margin-bottom:6px;text-align:center;"></div>
       <div style="display:flex;align-items:center;gap:24px;margin:6px 0;">
-        <button class="btn" onclick="chScore(-1)" style="width:64px;height:64px;border-radius:50%;background:var(--bg);border:2.5px solid var(--border);font-size:34px;color:var(--text);flex-shrink:0;">−</button>
+        <button class="btn" id="g-minus" onclick="chScore(-1)" style="width:64px;height:64px;border-radius:50%;background:var(--bg);border:2.5px solid var(--border);font-size:34px;color:var(--text);flex-shrink:0;">−</button>
         <div class="D" style="font-size:100px;line-height:1;min-width:100px;text-align:center;" id="g-score">—</div>
-        <button class="btn" onclick="chScore(1)" style="width:64px;height:64px;border-radius:50%;background:var(--green);border:none;font-size:34px;color:#fff;flex-shrink:0;">+</button>
+        <button class="btn" id="g-plus" onclick="chScore(1)" style="width:64px;height:64px;border-radius:50%;background:var(--green);border:none;font-size:34px;color:#fff;flex-shrink:0;">+</button>
       </div>
       <div id="g-ecart" style="font-family:'Barlow Condensed',sans-serif;font-weight:700;font-size:16px;color:var(--muted);text-align:center;min-height:22px;"></div>
       <button id="g-cross" onclick="setCross()" style="margin-top:14px;background:#fff;border:2px solid var(--border);border-radius:30px;padding:8px 18px;font-family:'Barlow Condensed',sans-serif;font-weight:700;font-size:13px;color:var(--muted);text-transform:uppercase;letter-spacing:.05em;cursor:pointer;-webkit-tap-highlight-color:transparent;">✕ Faire une croix</button>
     </div>
-    <div style="padding:10px 24px 8px;display:flex;gap:12px;">
+    <div id="g-hole-nav" style="padding:10px 24px 8px;display:flex;gap:12px;">
       <button class="btn B-out" id="g-prev" onclick="prevH()" style="flex:1;">← Préc.</button>
-      <button class="btn B-dark" onclick="nextH()" style="flex:1.4;">Trou suivant →</button>
+      <button class="btn B-dark" id="g-next" onclick="nextH()" style="flex:1.4;">Trou suivant →</button>
+      <button class="btn B-green" id="g-syndicat-confirm" onclick="confirmSyndicatScore()" style="display:none;flex:1;padding:17px;">✓ Valider mon score</button>
     </div>
     <div style="padding:0 24px 10px;">
       <button class="btn" onclick="endGame()" style="background:#FFF0F0;color:var(--red);border-radius:var(--r);padding:13px;width:100%;font-family:'Barlow Condensed',sans-serif;font-weight:800;font-size:14px;letter-spacing:.05em;text-transform:uppercase;gap:8px;">🏁 Terminer la partie</button>
@@ -379,10 +380,11 @@
     <div class="syndicat-rules-list">
       <div>Chaque joueur paie ceux qui réalisent un meilleur score brut.</div>
       <div><strong>Birdie ou mieux :</strong> paiement ×2.</div>
-      <div><strong>Triple bogey :</strong> pénalité supplémentaire ×2 aux vainqueurs.</div>
+      <div><strong>Triple bogey :</strong> paiement ×2 aux vainqueurs, à la place du paiement normal.</div>
       <div><strong>Égalité générale :</strong> la mise est reportée et les reports se cumulent.</div>
       <div><strong>Joker :</strong> un par joueur, un seul par trou, tous les montants ×2.</div>
-      <div>Une croix ou un score supérieur compte comme triple bogey.</div>
+      <div>Tout score supérieur est automatiquement plafonné au triple bogey.</div>
+      <div>Le résultat est calculé lorsque chaque joueur a validé son propre score.</div>
     </div>
     <button class="btn B-dark" onclick="closeSyndicatRules()" style="margin-top:18px;">J'ai compris</button>
   </div>

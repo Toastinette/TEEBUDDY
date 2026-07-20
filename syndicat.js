@@ -100,6 +100,9 @@
         if (rel[a] === rel[b]) continue;
         var from = rel[a] > rel[b] ? a : b;
         var to = from === a ? b : a;
+        // Le triple bogey règle les vainqueurs via sa pénalité dédiée ci-dessous.
+        // Cette pénalité remplace (et ne complète pas) le paiement normal envers eux.
+        if (rel[from] >= 3 && result.winners.indexOf(to) >= 0) continue;
         var multiplier = rel[to] <= -1 ? 2 : 1;
         raw.push({
           fromPlayerId: from,

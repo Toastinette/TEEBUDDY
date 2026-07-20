@@ -87,6 +87,30 @@ function syndicatPreviousHolesValidated(game, holeIndex) {
   return true;
 }
 
+function syndicatFirstOpenHole(game) {
+  var validated = (game && game.syndicatValidated) || {};
+  for (var hole = 0; hole < 18; hole++) if (!validated[String(hole)]) return hole;
+  return 17;
+}
+
+function syndicatHoleConfirmations(game, holeIndex) {
+  var all = (game && game.syndicatScoreConfirmations) || {};
+  return all[String(holeIndex)] || {};
+}
+
+function syndicatPlayerConfirmed(game, holeIndex, pid) {
+  return !!(pid && syndicatHoleConfirmations(game, holeIndex)[pid]);
+}
+
+function syndicatNewlyValidatedHole(previousGame, nextGame) {
+  if (!previousGame || !nextGame || nextGame.mode !== 'syndicat') return -1;
+  var before = previousGame.syndicatValidated || {}, after = nextGame.syndicatValidated || {};
+  for (var hole = 0; hole < 18; hole++) {
+    if (!before[String(hole)] && after[String(hole)]) return hole;
+  }
+  return -1;
+}
+
 function syndicatFirstUnplayedHole(game) {
   var validated = game.syndicatValidated || {};
   for (var hole = 0; hole < 18; hole++) {
@@ -159,6 +183,41 @@ function syndicatJokerUsedBy(pid, game) {
   return game.syndicatJokerUsed && game.syndicatJokerUsed[pid] !== undefined;
 }
 
+function renderSyndicatConfirmButton() {
+  var button = document.getElementById('g-syndicat-confirm');
+  var minus = document.getElementById('g-minus'), plus = document.getElementById('g-plus');
+  if (!button) return;
+  if (!isSyndicat()) {
+    button.style.display = 'none'; button.disabled = false;
+    if (minus) minus.disabled = false;
+    if (plus) plus.disabled = false;
+    return;
+  }
+  button.style.display = 'flex';
+  var round = syndicatRound(S.game, true), result = round && round.holes[S.hole];
+  var pid = activePlayerPid();
+  var confirmed = syndicatPlayerConfirmed(S.game, S.hole, pid);
+  var score = pid ? getScores(pid)[S.hole] : null;
+  var locked = (confirmed || S.syndicatConfirmPending) && result && !result.validated;
+  if (minus) minus.disabled = !!locked;
+  if (plus) plus.disabled = !!locked;
+  if (S.spectating || !pid) {
+    button.disabled = true; button.textContent = 'Mode spectateur';
+  } else if (!result || result.unavailableUntilPreviousValidation) {
+    button.disabled = true; button.textContent = 'Trou précédent en attente';
+  } else if (result.validated) {
+    button.disabled = false; button.textContent = '✓ Voir le résultat du trou';
+  } else if (S.syndicatConfirmPending) {
+    button.disabled = true; button.textContent = 'Validation en cours…';
+  } else if (confirmed) {
+    button.disabled = true; button.textContent = '✓ Mon score est validé';
+  } else if (score === null || score === undefined) {
+    button.disabled = true; button.textContent = 'Saisissez votre score';
+  } else {
+    button.disabled = false; button.textContent = '✓ Valider mon score';
+  }
+}
+
 function renderSyndicatGamePanel() {
   var box = document.getElementById('g-syndicat'); if (!box) return;
   if (!isSyndicat()) { box.style.display = 'none'; box.innerHTML = ''; return; }
@@ -173,9 +232,8 @@ function renderSyndicatGamePanel() {
   var jokerUsed = activePid ? syndicatJokerUsedBy(activePid, S.game) : true;
   var anyScore = syndicatLiveHoleHasScore(S.hole);
   var editableJoker = !S.spectating && activePid && !result.validated && !activeJoker && !jokerUsed && !anyScore;
-  var scoreCount = (S.game.players || []).filter(function (player) {
-    var score = getScores(player.pid)[S.hole]; return score !== null && score !== undefined;
-  }).length;
+  var confirmations = syndicatHoleConfirmations(S.game, S.hole);
+  var confirmedCount = (S.game.players || []).filter(function (player) { return !!confirmations[player.pid]; }).length;
   var breakdown = 'Mise de base : ' + syndicatEuro(result.baseStakeCents);
   if (result.carryInCents) breakdown += '<br>Reports cumulés : +' + syndicatEuro(result.carryInCents);
   if (activeJoker) breakdown += '<br>Joker ×2 activé par ' + esc(syndicatPlayerName(activeJoker.playerId));
@@ -187,23 +245,18 @@ function renderSyndicatGamePanel() {
     jokerHtml = '<button class="syndicat-joker-btn" onclick="activateSyndicatJoker()"' + (editableJoker ? '' : ' disabled') + '>🃏 Utiliser mon joker</button><div style="font-size:10px;color:rgba(255,255,255,.6);margin-top:5px;">' + note + '</div>';
   }
   var validation = '';
-  var scoreRecap = '';
-  if (result.complete && !result.validated) {
-    scoreRecap = '<div class="syndicat-score-recap">' + (S.game.players || []).map(function (player) {
-      return '<div><span>' + esc(player.prenom) + '</span><strong>' + syndicatScoreLabel(result.relativeScores[player.pid]) + '</strong></div>';
-    }).join('') + '</div>';
-  }
   if (result.validated) {
-    validation = '<button class="btn B-green syndicat-validate" onclick="openSyndicatResult(' + S.hole + ')" style="padding:11px;">✓ Résultat validé · Voir le détail</button>';
-  } else if (S.game.host === S.player.pid && result.complete) {
-    validation = '<button class="btn B-green syndicat-validate" onclick="validateSyndicatHole()" style="padding:11px;">Valider et calculer les mises</button>';
+    validation = '<button class="syndicat-result-link" onclick="openSyndicatResult(' + S.hole + ')">✓ Résultat calculé · Voir le détail</button>';
   } else {
-    validation = '<div style="font-size:11px;color:rgba(255,255,255,.65);margin-top:9px;text-align:center;">' + scoreCount + '/' + (S.game.players || []).length + ' scores · ' + (S.game.host === S.player.pid ? 'complétez les scores pour valider' : 'validation par l’hôte') + '</div>';
+    validation = '<div class="syndicat-confirm-status">' + confirmedCount + '/' + (S.game.players || []).length + ' joueurs ont validé leur score</div>';
+    if (syndicatPlayerConfirmed(S.game, S.hole, activePid)) {
+      validation += '<button class="syndicat-edit-score" onclick="cancelSyndicatScoreConfirmation()">Modifier mon score</button>';
+    }
   }
   box.innerHTML =
     '<div class="syndicat-stake-card">' +
       '<div class="syndicat-stake-main"><div><div class="L" style="color:rgba(255,255,255,.6);">Mise du trou ' + (S.hole + 1) + '</div><div style="font-size:12px;color:rgba(255,255,255,.72);">Score brut · maximum triple bogey</div></div><div class="syndicat-stake-value">' + syndicatEuro(result.finalStakeCents) + '</div></div>' +
-      '<div class="syndicat-breakdown">' + breakdown + '</div>' + jokerHtml + scoreRecap + validation +
+      '<div class="syndicat-breakdown">' + breakdown + '</div>' + jokerHtml + validation +
     '</div>';
 }
 
@@ -231,30 +284,60 @@ function activateSyndicatJoker() {
     .catch(function (error) { toast(error.message || 'Impossible d’activer le joker'); });
 }
 
-function validateSyndicatHole() {
-  if (!FB_OK || !isSyndicat() || S.game.host !== S.player.pid) return;
-  var holeIndex = S.hole, ref = DB.collection('games').doc(S.gameId);
+function confirmSyndicatScore() {
+  if (!isSyndicat() || S.spectating) return;
+  var holeIndex = S.hole, pid = activePlayerPid();
+  var round = syndicatRound(S.game, true), result = round && round.holes[holeIndex];
+  if (result && result.validated) { openSyndicatResult(holeIndex); return; }
+  if (!FB_OK || !pid || S.syndicatConfirmPending) return;
+  var localScores = getScores(pid).slice(), localScore = localScores[holeIndex];
+  if (localScore === null || localScore === undefined) { toast('Saisissez votre score avant de le valider'); return; }
+  S.syndicatConfirmPending = true;
+  renderSyndicatConfirmButton();
+  var ref = DB.collection('games').doc(S.gameId);
   DB.runTransaction(function (transaction) {
     return transaction.get(ref).then(function (snapshot) {
       if (!snapshot.exists) throw new Error('Partie introuvable');
       var game = snapshot.data();
       if (game.mode !== 'syndicat') throw new Error('Le mode Syndicat n’est plus actif');
-      if (!syndicatPreviousHolesValidated(game, holeIndex)) throw new Error('Validez les trous précédents dans l’ordre');
-      var complete = (game.players || []).every(function (player) {
-        var value = game.scores && game.scores[player.pid] && game.scores[player.pid][holeIndex];
-        return value !== null && value !== undefined;
-      });
-      if (!complete) throw new Error('Tous les joueurs doivent avoir un score');
+      if (!syndicatPreviousHolesValidated(game, holeIndex)) throw new Error('Le trou précédent n’est pas encore validé');
+      if (!(game.players || []).some(function (player) { return player.pid === pid; })) throw new Error('Joueur introuvable dans cette partie');
+      if ((game.syndicatValidated || {})[String(holeIndex)]) return { alreadyComplete: true };
+      var allConfirmations = Object.assign({}, game.syndicatScoreConfirmations || {});
+      var holeConfirmations = Object.assign({}, allConfirmations[String(holeIndex)] || {});
+      holeConfirmations[pid] = { score: localScore, at: Date.now() };
+      allConfirmations[String(holeIndex)] = holeConfirmations;
+      var allConfirmed = (game.players || []).every(function (player) { return !!holeConfirmations[player.pid]; });
       var validated = Object.assign({}, game.syndicatValidated || {});
-      validated[String(holeIndex)] = { by: S.player.pid, at: Date.now() };
-      transaction.update(ref, { syndicatValidated: validated, updatedAt: firebase.firestore.FieldValue.serverTimestamp() });
+      if (allConfirmed) validated[String(holeIndex)] = { by: 'all_players', at: Date.now() };
+      var update = { syndicatScoreConfirmations: allConfirmations, syndicatValidated: validated, updatedAt: firebase.firestore.FieldValue.serverTimestamp() };
+      update['scores.' + pid] = localScores;
+      transaction.update(ref, update);
+      return { allConfirmed: allConfirmed };
     });
-  }).then(function () {
-    if (!S.game.syndicatValidated) S.game.syndicatValidated = {};
-    S.game.syndicatValidated[String(holeIndex)] = { by: S.player.pid, at: Date.now() };
-    toast('Trou ' + (holeIndex + 1) + ' validé ✓', true);
-    openSyndicatResult(holeIndex);
-  }).catch(function (error) { toast(error.message || 'Impossible de valider le trou'); });
+  }).then(function (info) {
+    if (!info || !info.allConfirmed) toast('Score validé · en attente des autres joueurs', true);
+  }).catch(function (error) { toast(error.message || 'Impossible de valider votre score'); })
+    .then(function () { S.syndicatConfirmPending = false; renderSyndicatConfirmButton(); });
+}
+
+function cancelSyndicatScoreConfirmation() {
+  if (!FB_OK || !isSyndicat() || S.spectating) return;
+  var holeIndex = S.hole, pid = activePlayerPid(); if (!pid) return;
+  var ref = DB.collection('games').doc(S.gameId);
+  DB.runTransaction(function (transaction) {
+    return transaction.get(ref).then(function (snapshot) {
+      if (!snapshot.exists) throw new Error('Partie introuvable');
+      var game = snapshot.data();
+      if ((game.syndicatValidated || {})[String(holeIndex)]) throw new Error('Le résultat du trou est déjà calculé');
+      var allConfirmations = Object.assign({}, game.syndicatScoreConfirmations || {});
+      var holeConfirmations = Object.assign({}, allConfirmations[String(holeIndex)] || {});
+      delete holeConfirmations[pid];
+      allConfirmations[String(holeIndex)] = holeConfirmations;
+      transaction.update(ref, { syndicatScoreConfirmations: allConfirmations, updatedAt: firebase.firestore.FieldValue.serverTimestamp() });
+    });
+  }).then(function () { toast('Validation annulée · vous pouvez corriger votre score'); })
+    .catch(function (error) { toast(error.message || 'Impossible de modifier ce score'); });
 }
 
 function syndicatDetailLabel(detail) {
@@ -353,6 +436,10 @@ function prepareSyndicatScoreEdit() {
   if (!isSyndicat()) return true;
   if (!syndicatPreviousHolesValidated(S.game, S.hole)) { toast('Validez les trous précédents avant de scorer celui-ci'); return false; }
   var validated = !!((S.game.syndicatValidated || {})[String(S.hole)]);
+  if (!validated && syndicatPlayerConfirmed(S.game, S.hole, activePlayerPid())) {
+    toast('Appuyez sur « Modifier mon score » avant de le corriger');
+    return false;
+  }
   if (!validated) return true;
   var pid = activePlayerPid(), key = S.hole + ':' + pid;
   if (!S.syndicatEditConfirmed) S.syndicatEditConfirmed = {};
